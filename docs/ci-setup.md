@@ -7,28 +7,63 @@ and uploads to TestFlight with an App Store Connect API key.
 workflow therefore runs on a **self-hosted runner installed on media** — that
 is the supported way to build on a machine GitHub can't reach.
 
-## One-time: register the self-hosted runner on media
+## The runner on media
 
-On GitHub: **Settings → Actions → Runners → New self-hosted runner → macOS/ARM64**,
-then run the commands it gives you on media:
+Already installed, as a **repository-level** runner in
+`~/actions-runner-statusboard`:
+
+| | |
+| --- | --- |
+| Name | `statusboard-media` |
+| Labels | `self-hosted, macOS, X64, media, statusboard` |
+| Service | `actions.runner.AM-Guru-StatusBoard.statusboard-media` |
+
+It is repo-level on purpose. media's *other* runner (`macos-build`) belongs to
+the org runner group `slaptop-main-release`, whose allow-list is Slaptop and
+SybilSight only — StatusBoard cannot schedule jobs on it, and widening that
+group would grant this repo access to a privileged machine.
+
+Two things that are easy to get wrong here:
+
+- **X64, not ARM64.** media is Apple silicon, but the native arm64 runner
+  package fails to start on it (`Failed to create CoreCLR, HRESULT: 0x8007000C`),
+  so it runs the x86_64 package under Rosetta. A workflow asking for an `ARM64`
+  label queues forever — which is exactly why nothing ran at first.
+- **The service needs Homebrew on its PATH.** `brew` and `xcodegen` live in
+  `/opt/homebrew/bin`, which a non-login service shell does not include, so
+  `~/actions-runner-statusboard/.env` sets `PATH` explicitly.
+
+Managing it:
 
 ```bash
-ssh media
-mkdir -p ~/actions-runner && cd ~/actions-runner
-# paste the download + config commands from the GitHub runner page, then:
-./config.sh --url https://github.com/AM-Guru/StatusBoard --token <TOKEN> \
-            --labels self-hosted,macOS,ARM64,media --unattended
-./svc.sh install && ./svc.sh start      # runs at login, survives reboots
+ssh media 'cd ~/actions-runner-statusboard && ./svc.sh status'
 ```
 
-The workflow targets `runs-on: [self-hosted, macOS, ARM64, media]`, so the
-`media` label matters.
+## When the workflow runs
 
-Also install XcodeGen once (the workflow installs it if missing):
+| Event | Test | Build | Upload |
+| --- | --- | --- | --- |
+| Push to `main` | yes | no | no |
+| Push a `v*` tag | yes | yes | yes |
+| Manual **Run workflow** | yes | yes | your choice |
 
-```bash
-ssh media 'brew install xcodegen'
-```
+The build job is gated behind `if: startsWith(github.ref, 'refs/tags/v') ||
+github.event_name == 'workflow_dispatch'`, so everyday pushes only run tests and
+never need signing credentials. The upload decision is made in shell rather than
+a GitHub expression, because the *string* `"false"` is truthy in those — the
+earlier version would have uploaded even with the checkbox cleared.
+
+## Still required before CI can cut a release
+
+1. **A distribution signing identity on media.** It currently has only
+   `Apple Development: Kalani Helekunihi`. Archiving for the App Store needs
+   `Apple Distribution: AM Guru, LLC` *and its private key*, which means
+   exporting a `.p12` from the Mac that has it and importing it into media's
+   login keychain. Only you can do that — it is private key material.
+2. **The tvOS App Store profile**, since tvOS signs manually:
+   `~/Library/Developer/Xcode/UserData/Provisioning Profiles/` on media needs
+   `Status Board tvOS App Store`.
+3. **The four repository secrets** below.
 
 ## One-time: repository secrets
 

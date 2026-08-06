@@ -1,12 +1,20 @@
 name: Build and Release
 
 # `media` (192.168.1.10) is on the LAN, so GitHub-hosted runners cannot reach
-# it over SSH. The build therefore runs on a **self-hosted runner installed on
-# media** — see docs/ci-setup.md for the one-time registration.
+# it over SSH. The build therefore runs on a repository-level self-hosted
+# runner installed on media, registered as `statusboard-media`.
+#
+# Its labels are: self-hosted, macOS, X64, media, statusboard. Note **X64, not
+# ARM64** — the Mac is Apple silicon, but the native arm64 runner package fails
+# to start there (CoreCLR 0x8007000C), so it runs the x86_64 package under
+# Rosetta. Asking for an ARM64 label leaves every job queued forever.
+#
+# See docs/ci-setup.md for the remaining prerequisites.
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]      # verify every push: test + build, no upload
+    tags: ["v*"]          # cut a release: test + build + upload
   workflow_dispatch:
     inputs:
       platforms:
@@ -27,7 +35,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: [self-hosted, macOS, ARM64, media]
+    runs-on: [self-hosted, macOS, media]
     steps:
       - uses: actions/checkout@v4
       - name: Show toolchain
@@ -40,7 +48,10 @@ jobs:
 
   build:
     needs: test
-    runs-on: [self-hosted, macOS, ARM64, media]
+    # Signing and uploading only happen for a release. A push to main just runs
+    # the tests above, so ordinary work does not need signing credentials.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, macOS, media]
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
@@ -70,11 +81,19 @@ jobs:
         env:
           BUILD_NUMBER: ${{ steps.build_number.outputs.value }}
           PLATFORMS: ${{ github.event.inputs.platforms || 'all' }}
-          DO_UPLOAD: ${{ github.event.inputs.upload || 'true' }}
+          UPLOAD_INPUT: ${{ github.event.inputs.upload }}
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           set -euo pipefail
           ARGS=(--build-number "$BUILD_NUMBER" --platforms "$PLATFORMS")
-          [ "$DO_UPLOAD" = "true" ] && ARGS+=(--upload)
+          # A manual run honours its checkbox; otherwise only tags upload, so a
+          # push to main verifies the build without spending a TestFlight slot.
+          if [ -n "$UPLOAD_INPUT" ]; then
+            [ "$UPLOAD_INPUT" = "true" ] && ARGS+=(--upload) || true
+          elif [ "$IS_TAG" = "true" ]; then
+            ARGS+=(--upload)
+          fi
+          echo "running: ./Scripts/release.sh ${ARGS[*]}"
           ./Scripts/release.sh "${ARGS[@]}"
 
       - name: Upload artifacts
