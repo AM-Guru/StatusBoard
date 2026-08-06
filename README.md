@@ -1,11 +1,19 @@
 # Status Board
 
-A modern, multi-platform spiritual successor to Panic's classic Status Board
-iPad app — rebuilt in Swift + SwiftUI for **macOS, iPhone, iPad, Apple TV, and
-Apple Watch**, with iCloud sync, a Mac "bridge" server for terminal/AI tooling,
-MCP integrations, Shortcuts actions, and WidgetKit widgets everywhere.
+A self-hosted dashboard for Apple devices, in Swift + SwiftUI for **macOS,
+iPhone, iPad, Apple TV and Apple Watch**. Build boards from live panels, clip a
+region of any web page, wire in the services you already run, and push your own
+values straight from the terminal — with iCloud sync between your own devices, a
+Mac "bridge" for terminal and AI tooling, MCP integrations, Shortcuts actions
+and WidgetKit widgets everywhere.
+
+No account, no analytics, no server: the app has zero external dependencies and
+the developer has no way to see your data.
 
 ![Platforms](https://img.shields.io/badge/platforms-macOS%2015%20·%20iOS%2018%20·%20tvOS%2018%20·%20watchOS%2011-orange)
+![License](https://img.shields.io/badge/license-MIT-blue)
+
+<https://statusboard.am.guru>
 
 ## Features
 
@@ -312,7 +320,23 @@ their services directly from each device:
 
 - Web clips on Apple TV are rendered to images by the Mac bridge (tvOS has no
   WKWebView) — keep the Mac app running for those panels.
-- The iOS app keeps the screen awake, in the spirit of the original.
+- The iOS app keeps the screen awake so a board stays readable.
 - `NSAllowsArbitraryLoads` is enabled so web clips/feeds/queries can use
   plain-HTTP endpoints (e.g. homelab dashboards); remove it from `project.yml`
   if you only need HTTPS.
+
+## Contributing
+
+Pull requests are welcome.
+
+`main` is protected: it takes signed commits from the repository owner only, so
+every other change arrives through a pull request. Sign your commits (`git
+commit -S`, or turn on `commit.gpgsign`) and keep `swift test` green —
+`Packages/StatusBoardKit` is where the logic and the tests live.
+
+The Xcode project is generated: edit `project.yml` and run `xcodegen generate`
+rather than editing `StatusBoard.xcodeproj`, which is not tracked.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright © 2026 Kalani Helekunihi.

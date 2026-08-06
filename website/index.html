@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d11">
-  <meta name="description" content="Status Board is a self-hosted dashboard for Apple devices. Build live boards from panels, web clips, your own scripts and the services you already use — on Mac, iPhone, iPad, Apple TV and Apple Watch. No accounts, no tracking, no server.">
+  <meta name="description" content="Status Board is a free, open-source (MIT) self-hosted dashboard for Apple devices. Build live boards from panels, web clips, your own scripts and the services you already use — on Mac, iPhone, iPad, Apple TV and Apple Watch. No accounts, no tracking, no server.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://statusboard.am.guru/">
   <meta property="og:title" content="Status Board — a self-hosted dashboard for every screen you own">
@@ -20,8 +20,8 @@
   <meta name="twitter:image" content="https://statusboard.am.guru/og.png">
   <title>Status Board — A self-hosted dashboard for every screen you own</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=2">
-  <script src="script.js?v=2" defer></script>
+  <link rel="stylesheet" href="styles.css?v=3">
+  <script src="script.js?v=3" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -41,6 +41,7 @@
         <a href="#bridge">The bridge</a>
         <a href="#screens">Every screen</a>
         <a href="#privacy">Privacy</a>
+        <a href="#open">Open source</a>
         <a class="nav-cta" href="#get">Get the beta</a>
       </nav>
     </div>
@@ -49,7 +50,7 @@
   <main id="main">
     <!-- ── Hero ───────────────────────────────────────────────────────── -->
     <section class="hero" id="top">
-      <div class="eyebrow reveal"><i aria-hidden="true"></i> Now in TestFlight</div>
+      <div class="eyebrow reveal"><i aria-hidden="true"></i> Now in TestFlight · free &amp; open source</div>
       <h1 class="reveal">
         Every number you care about.<br>
         <span>On every screen you own.</span>
@@ -69,6 +70,7 @@
         <span>24 panel kinds</span>
         <span>No account</span>
         <span>No tracking</span>
+        <span>MIT licensed</span>
         <span>iCloud sync between your own devices</span>
       </div>
     </section>
@@ -288,14 +290,54 @@
           <li><span>Your device talks to each service directly; nothing is proxied</span></li>
           <li><span>Bridge traffic never leaves your local network</span></li>
           <li><span>App Store privacy label: <strong>Data Not Collected</strong></span></li>
+          <li><span>All of it <a href="https://github.com/AM-Guru/StatusBoard">open source</a>, so you can check</span></li>
         </ul>
+      </div>
+    </section>
+
+    <!-- ── Open source ────────────────────────────────────────────────── -->
+    <section id="open">
+      <div class="section-heading reveal">
+        <span class="section-number">08 / OPEN SOURCE</span>
+        <h2>Free, and the whole thing is readable.</h2>
+        <p>
+          Status Board is open source under the MIT licence. The app, the bridge,
+          the connectors, the release pipeline and this website all live in one
+          public repository — so you can audit the privacy claims on this page
+          rather than take them on trust, build it yourself, or fork it.
+        </p>
+      </div>
+      <div class="grid reveal">
+        <div class="card">
+          <div class="glyph" aria-hidden="true">MIT</div>
+          <h3>MIT licensed</h3>
+          <p>Use it, change it, ship it. Attribution is the only condition.</p>
+        </div>
+        <div class="card teal">
+          <div class="glyph" aria-hidden="true">◉</div>
+          <h3>Zero dependencies</h3>
+          <p>No third-party SDKs anywhere in the app — which is exactly why the privacy label reads "Data Not Collected".</p>
+        </div>
+        <div class="card violet">
+          <div class="glyph" aria-hidden="true">⑂</div>
+          <h3>Pull requests welcome</h3>
+          <p><code>main</code> takes signed commits from the owner; everything else comes in through a pull request.</p>
+        </div>
+      </div>
+      <div class="hero-actions reveal">
+        <a class="button button-primary" href="https://github.com/AM-Guru/StatusBoard" target="_blank" rel="noopener noreferrer">
+          Read the source on GitHub <span aria-hidden="true">↗</span>
+        </a>
+        <a class="button button-secondary" href="https://github.com/AM-Guru/StatusBoard/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">
+          MIT License <span aria-hidden="true">↗</span>
+        </a>
       </div>
     </section>
 
     <!-- ── Get it ─────────────────────────────────────────────────────── -->
     <section id="get">
       <div class="section-heading reveal">
-        <span class="section-number">08 / GET IT</span>
+        <span class="section-number">09 / GET IT</span>
         <h2>Put your first board up today.</h2>
         <p>Status Board is in TestFlight now for Mac, iPhone, iPad, Apple TV and Apple Watch.</p>
       </div>
@@ -323,7 +365,7 @@
 
   <footer>
     <div class="footer-wordmark">Status<span>·</span>Board</div>
-    <p>Made by Kalani Helekunihi.</p>
+    <p>Made by Kalani Helekunihi. Free and open source under the <a href="https://github.com/AM-Guru/StatusBoard/blob/main/LICENSE">MIT License</a>.</p>
     <div class="footer-links">
       <a href="https://github.com/AM-Guru/StatusBoard" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
       <a href="terms.html">Terms of Service</a>
