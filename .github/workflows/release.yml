@@ -64,7 +64,17 @@ jobs:
       - name: Run tests
         shell: bash
         working-directory: Packages/StatusBoardKit
-        run: swift test
+        run: |
+          set -euo pipefail
+          # The runner is the x86_64 package under Rosetta, but SwiftPM builds
+          # the test bundle for arm64 — so an x86_64 `xctest` cannot dlopen it
+          # ("doesn't contain a version for the current architecture") and the
+          # command exits 1 even when every test passes. Run natively instead.
+          if [[ "$(uname -m)" == "x86_64" && "$(sysctl -n hw.optional.arm64 2>/dev/null)" == "1" ]]; then
+            echo "Apple silicon host, x86_64 shell — re-running tests under arm64."
+            exec arch -arm64 swift test
+          fi
+          swift test
 
   release:
     name: Build and upload to TestFlight
