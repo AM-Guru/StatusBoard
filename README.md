@@ -68,6 +68,19 @@ the developer has no way to see your data.
   cookie-banner networks offline; the full EasyList downloads and caches in the
   background. Toggle per panel.
 - **Multiple dashboards**, synced across devices via **CloudKit** (CKSyncEngine).
+- **Per-device layouts** — one board, arranged differently per screen. A 16:9 TV
+  across the room and a phone in your hand rarely want the same grid, so each
+  device class (Mac, iPad, iPhone, Apple TV, Watch) can carry its own panel
+  positions, grid size, and hidden panels. Devices you never customize keep
+  following the board's shared layout, so nothing changes until you ask for it.
+- **Device Preview** on Mac, iPad and iPhone (toolbar button, or ⇧⌘D) — see a
+  board exactly as another screen shows it and arrange it from there. The board
+  is laid out at the target screen's real point size and then scaled to fit, so
+  panel text shrinks in proportion and you can tell what will be legible from
+  the couch. Drag and resize panels, toggle individual panels off per device,
+  set that screen's grid, Auto-Arrange, or copy another device's arrangement.
+  The Apple TV preview also draws a **TV-safe guide**: anything outside the
+  dashed line is at risk of being cropped by the television's overscan.
 - Classic touches: triple-tap a panel to force-reload it; share a board as JSON
   from the toolbar.
 - **Per-panel accent colors** — pick any color in a panel's Appearance section;
@@ -79,8 +92,15 @@ the developer has no way to see your data.
   samples one number per refresh and charts its accumulated history.
 - **Lock Screen widgets** on iOS (inline, circular gauge, rectangular) plus the
   Home Screen/desktop widget families.
-- **Apple TV auto-cycling** — a Settings tab on tvOS rotates through your
-  dashboards on a timer, wall-display style.
+- **Apple TV menu** — swipe down (or click) for a ten-foot menu that picks which
+  of your iCloud-synced boards this Apple TV shows. The choice is remembered per
+  device, so each screen in the house can sit on its own board, and it is
+  restored even when that board only arrives from iCloud after launch. The menu
+  also shows iCloud sync status with a "Check iCloud for Boards" action,
+  auto-cycling through boards on a timer, wall-display style, and a **Screen
+  Fit** choice — boards stay inside the TV-safe area by default so overscan
+  can't crop a panel, or fill the whole screen on a display that shows every
+  pixel.
 - **Apple Watch app + complications** — browse panels, tap for full-screen live
   views, and put any panel on your watch face (inline, circular, rectangular,
   and corner complications). Dashboards arrive via iCloud; URL panels fetch

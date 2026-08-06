@@ -19,6 +19,12 @@ public final class AppModel {
     #endif
 
     public var isEditing = false
+    /// Shows the device simulator sheet for the visible board.
+    public var showsDeviceSimulator = false
+    /// Whether the simulator is editing the previewed device's layout. Held
+    /// here rather than as sheet state so it survives the sheet being rebuilt,
+    /// and so dismissing always leaves edit mode behind.
+    public var simulatorEditsLayout = false
     public var inspectedPanelID: Panel.ID?
     /// The panel keyboard commands act on (⌘D duplicate, ⌘C copy, delete).
     public var selectedPanelID: Panel.ID?

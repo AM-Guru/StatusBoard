@@ -6,6 +6,17 @@ import SwiftUI
 public struct BoardView: View {
     let model: AppModel
     let dashboardID: Dashboard.ID
+    /// Which screen's arrangement to draw. `nil` means "this device", the
+    /// normal case; the device simulator passes another screen's class to
+    /// preview and edit its layout from here.
+    let layoutTarget: SBDeviceClass?
+    /// True inside the simulator, where the board is a picture of another
+    /// screen rather than the live one — so panel context menus and the
+    /// triple-tap reload stay out of the way.
+    let isPreview: Bool
+    /// Overrides the app-wide edit mode, so the simulator can be editable
+    /// without putting the window behind it into edit mode too.
+    let editingOverride: Bool?
 
     @State private var draggingPanelID: Panel.ID?
     @State private var dragOffset: CGSize = .zero
@@ -14,26 +25,38 @@ public struct BoardView: View {
 
     private let spacing: CGFloat = 10
 
-    public init(model: AppModel, dashboardID: Dashboard.ID) {
+    public init(model: AppModel, dashboardID: Dashboard.ID,
+                layoutTarget: SBDeviceClass? = nil, isPreview: Bool = false,
+                editingOverride: Bool? = nil) {
         self.model = model
         self.dashboardID = dashboardID
+        self.layoutTarget = layoutTarget
+        self.isPreview = isPreview
+        self.editingOverride = editingOverride
     }
+
+    /// The screen being laid out — the simulator's target, or this device.
+    private var device: SBDeviceClass { layoutTarget ?? .current }
+
+    private var isEditing: Bool { editingOverride ?? model.isEditing }
 
     public var body: some View {
         GeometryReader { proxy in
             if let board = model.store.dashboard(id: dashboardID) {
-                let cellWidth = (proxy.size.width - spacing) / CGFloat(board.grid.columns)
-                let cellHeight = (proxy.size.height - spacing) / CGFloat(board.grid.rows)
+                let grid = board.grid(for: device)
+                let panels = board.panels(for: device)
+                let cellWidth = (proxy.size.width - spacing) / CGFloat(max(1, grid.columns))
+                let cellHeight = (proxy.size.height - spacing) / CGFloat(max(1, grid.rows))
                 ZStack(alignment: .topLeading) {
-                    if model.isEditing {
-                        gridGuides(board: board, cellWidth: cellWidth, cellHeight: cellHeight)
+                    if isEditing {
+                        gridGuides(grid: grid, cellWidth: cellWidth, cellHeight: cellHeight)
                     }
-                    ForEach(board.panels) { panel in
-                        panelCell(panel, board: board,
+                    ForEach(panels) { panel in
+                        panelCell(panel, board: board, grid: grid,
                                   cellWidth: cellWidth, cellHeight: cellHeight)
                     }
-                    if board.panels.isEmpty {
-                        emptyState
+                    if panels.isEmpty {
+                        emptyState(boardHasPanels: !board.panels.isEmpty)
                             .frame(width: proxy.size.width, height: proxy.size.height)
                     }
                 }
@@ -46,41 +69,46 @@ public struct BoardView: View {
     // MARK: - Empty state
 
     @ViewBuilder
-    private var emptyState: some View {
+    private func emptyState(boardHasPanels: Bool) -> some View {
         VStack(spacing: 14) {
             Image(systemName: "rectangle.grid.2x2")
                 .font(.system(size: 40, weight: .light))
                 .foregroundStyle(SBTheme.accent)
-            Text("This board is empty")
+            Text(boardHasPanels ? "Nothing shown on \(device.displayName)"
+                                : "This board is empty")
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .foregroundStyle(SBTheme.textPrimary)
-            Text(Self.emptyStateHint)
+            Text(boardHasPanels
+                 ? "Every panel on this board is hidden on \(device.displayName)."
+                 : Self.emptyStateHint)
                 .font(.system(size: 14, design: .rounded))
                 .foregroundStyle(SBTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 380)
             #if !os(tvOS) && !os(watchOS)
-            Menu {
-                ForEach(PanelKind.allCases) { kind in
-                    Button {
-                        if let panel = model.store.addPanel(kind: kind, to: dashboardID) {
-                            model.isEditing = true
-                            model.inspectedPanelID = panel.id
+            if !boardHasPanels {
+                Menu {
+                    ForEach(PanelKind.allCases) { kind in
+                        Button {
+                            if let panel = model.store.addPanel(kind: kind, to: dashboardID) {
+                                model.isEditing = true
+                                model.inspectedPanelID = panel.id
+                            }
+                        } label: {
+                            Label(kind.displayName, systemImage: kind.symbolName)
                         }
-                    } label: {
-                        Label(kind.displayName, systemImage: kind.symbolName)
                     }
+                } label: {
+                    Label("Add a Panel", systemImage: "plus")
+                        .font(.system(size: 15, weight: .semibold, design: .rounded))
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 10)
+                        .background(SBTheme.accent, in: Capsule())
+                        .foregroundStyle(SBTheme.background)
                 }
-            } label: {
-                Label("Add a Panel", systemImage: "plus")
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
-                    .background(SBTheme.accent, in: Capsule())
-                    .foregroundStyle(SBTheme.background)
+                .menuStyle(.borderlessButton)
+                .fixedSize()
             }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
             #endif
         }
         .accessibilityElement(children: .contain)
@@ -99,7 +127,7 @@ public struct BoardView: View {
     // MARK: - Panel cell
 
     @ViewBuilder
-    private func panelCell(_ panel: Panel, board: Dashboard,
+    private func panelCell(_ panel: Panel, board: Dashboard, grid: BoardGrid,
                            cellWidth: CGFloat, cellHeight: CGFloat) -> some View {
         let frame = panel.frame
         let width = CGFloat(frame.width) * cellWidth - spacing
@@ -115,26 +143,26 @@ public struct BoardView: View {
             #if !os(tvOS) && !os(watchOS)
             // Gestures attach below the editing overlay so its gear/delete
             // buttons stay clickable while editing.
-            .gesture(model.isEditing ? moveGesture(panel, board: board,
-                                                   cellWidth: cellWidth,
-                                                   cellHeight: cellHeight) : nil)
+            .gesture(isEditing ? moveGesture(panel, grid: grid,
+                                             cellWidth: cellWidth,
+                                             cellHeight: cellHeight) : nil)
             // The classic Status Board gesture: triple-tap force-reloads a panel.
             .onTapGesture(count: 3) {
-                if panel.kind.isFetched { model.engine.refreshNow(panel: panel) }
+                if !isPreview, panel.kind.isFetched { model.engine.refreshNow(panel: panel) }
             }
             .onTapGesture {
-                if model.isEditing { model.selectedPanelID = panel.id }
+                if isEditing { model.selectedPanelID = panel.id }
             }
-            .contextMenu { panelContextMenu(panel) }
+            .contextMenu { if !isPreview { panelContextMenu(panel) } }
             #endif
             .overlay {
-                if model.isEditing {
-                    editingOverlay(panel, board: board,
+                if isEditing {
+                    editingOverlay(panel, grid: grid,
                                    cellWidth: cellWidth, cellHeight: cellHeight)
                 }
             }
             .overlay {
-                if model.isEditing && model.selectedPanelID == panel.id {
+                if isEditing && model.selectedPanelID == panel.id {
                     RoundedRectangle(cornerRadius: SBTheme.panelCornerRadius,
                                      style: .continuous)
                         .strokeBorder(SBTheme.secondaryAccent, lineWidth: 3)
@@ -188,7 +216,7 @@ public struct BoardView: View {
     // MARK: - Editing chrome
 
     @ViewBuilder
-    private func editingOverlay(_ panel: Panel, board: Dashboard,
+    private func editingOverlay(_ panel: Panel, grid: BoardGrid,
                                 cellWidth: CGFloat, cellHeight: CGFloat) -> some View {
         RoundedRectangle(cornerRadius: SBTheme.panelCornerRadius, style: .continuous)
             .strokeBorder(SBTheme.accent.opacity(0.7), lineWidth: 2)
@@ -227,7 +255,7 @@ public struct BoardView: View {
                     .foregroundStyle(SBTheme.background)
                     .padding(6)
                     .background(SBTheme.secondaryAccent, in: Circle())
-                    .gesture(resizeGesture(panel, board: board,
+                    .gesture(resizeGesture(panel, grid: grid,
                                            cellWidth: cellWidth, cellHeight: cellHeight))
                     .accessibilityLabel("Resize \(panel.title)")
                     .accessibilityHint("Drag to change the panel's size")
@@ -240,7 +268,7 @@ public struct BoardView: View {
     // MARK: - Gestures
 
     #if !os(tvOS) && !os(watchOS)
-    private func moveGesture(_ panel: Panel, board: Dashboard,
+    private func moveGesture(_ panel: Panel, grid: BoardGrid,
                              cellWidth: CGFloat, cellHeight: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 4)
             .onChanged { value in
@@ -252,15 +280,14 @@ public struct BoardView: View {
                     draggingPanelID = nil
                     dragOffset = .zero
                 }
-                var updated = panel
-                updated.frame.x += Int((value.translation.width / cellWidth).rounded())
-                updated.frame.y += Int((value.translation.height / cellHeight).rounded())
-                updated.frame = updated.frame.clamped(to: board.grid)
-                model.store.updatePanel(updated, in: dashboardID)
+                var frame = panel.frame
+                frame.x += Int((value.translation.width / cellWidth).rounded())
+                frame.y += Int((value.translation.height / cellHeight).rounded())
+                commit(frame.clamped(to: grid), for: panel)
             }
     }
 
-    private func resizeGesture(_ panel: Panel, board: Dashboard,
+    private func resizeGesture(_ panel: Panel, grid: BoardGrid,
                                cellWidth: CGFloat, cellHeight: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 2)
             .onChanged { value in
@@ -272,24 +299,40 @@ public struct BoardView: View {
                     resizingPanelID = nil
                     resizeDelta = .zero
                 }
-                var updated = panel
-                updated.frame.width = max(1, updated.frame.width + Int((value.translation.width / cellWidth).rounded()))
-                updated.frame.height = max(1, updated.frame.height + Int((value.translation.height / cellHeight).rounded()))
-                updated.frame = updated.frame.clamped(to: board.grid)
-                model.store.updatePanel(updated, in: dashboardID)
+                var frame = panel.frame
+                frame.width = max(1, frame.width + Int((value.translation.width / cellWidth).rounded()))
+                frame.height = max(1, frame.height + Int((value.translation.height / cellHeight).rounded()))
+                commit(frame.clamped(to: grid), for: panel)
             }
+    }
+
+    /// Writes a new frame where it belongs: into this device's own layout when
+    /// one exists (or when the simulator is editing another screen), otherwise
+    /// into the shared layout every device follows.
+    private func commit(_ frame: GridRect, for panel: Panel) {
+        let board = model.store.dashboard(id: dashboardID)
+        let usesOverride = layoutTarget != nil
+            || (board?.hasCustomLayout(for: device) ?? false)
+        if usesOverride {
+            model.store.setPanelFrame(frame, panelID: panel.id,
+                                      in: dashboardID, on: device)
+        } else {
+            var updated = panel
+            updated.frame = frame
+            model.store.updatePanel(updated, in: dashboardID)
+        }
     }
     #endif
 
-    private func gridGuides(board: Dashboard, cellWidth: CGFloat, cellHeight: CGFloat) -> some View {
+    private func gridGuides(grid: BoardGrid, cellWidth: CGFloat, cellHeight: CGFloat) -> some View {
         Canvas { context, size in
             var path = Path()
-            for column in 0...board.grid.columns {
+            for column in 0...grid.columns {
                 let x = CGFloat(column) * cellWidth + spacing / 2
                 path.move(to: CGPoint(x: x, y: 0))
                 path.addLine(to: CGPoint(x: x, y: size.height))
             }
-            for row in 0...board.grid.rows {
+            for row in 0...grid.rows {
                 let y = CGFloat(row) * cellHeight + spacing / 2
                 path.move(to: CGPoint(x: 0, y: y))
                 path.addLine(to: CGPoint(x: size.width, y: y))

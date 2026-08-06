@@ -63,6 +63,10 @@ struct SplitRootView: View {
                                    dashboardID: inspected.dashboardID)
             }
         }
+        .sheet(isPresented: $model.showsDeviceSimulator) {
+            DeviceSimulatorView(model: model,
+                                dashboardID: model.store.selectedDashboard?.id ?? UUID())
+        }
         .alert("Rename Dashboard", isPresented: Binding(
             get: { renamingBoard != nil },
             set: { if !$0 { renamingBoard = nil } })) {
@@ -171,6 +175,14 @@ struct SplitRootView: View {
             }
         }
         ToolbarItem(placement: .primaryAction) {
+            Button {
+                model.showsDeviceSimulator = true
+            } label: {
+                Label("Device Preview", systemImage: "rectangle.on.rectangle.angled")
+            }
+            .help("See this board on Apple TV, iPad, iPhone, Mac or Watch")
+        }
+        ToolbarItem(placement: .primaryAction) {
             Toggle(isOn: $model.isEditing) {
                 Label("Edit", systemImage: "slider.horizontal.3")
             }
@@ -257,15 +269,28 @@ struct BridgeStatusLabel: View {
 // MARK: - tvOS
 
 #if os(tvOS)
-/// Apple TV is a display first: the board fills the screen edge to edge with no
-/// permanent chrome. Swiping down on the remote brings up the board switcher and
-/// settings; the Menu button dismisses them again.
+/// Apple TV is a display first: the board fills the screen with no permanent
+/// chrome. Swiping down on the remote brings up the board picker and settings;
+/// the Menu button dismisses them again.
 struct TVRootView: View {
     @Bindable var model: AppModel
     /// 0 = off; otherwise seconds between automatic board switches.
     @AppStorage("sb.autoCycleSeconds") private var autoCycleSeconds = 0
+    /// The board this Apple TV shows, remembered across launches. Deliberately
+    /// device-local rather than synced: each screen in the house picks its own
+    /// board out of the shared iCloud set.
+    @AppStorage("sb.tv.boardID") private var pinnedBoardID = ""
+    /// Televisions crop the edges of the picture. Off by default, the board
+    /// stays inside the title-safe area so no panel can be lost to overscan;
+    /// on a screen that shows every pixel, turn it on to reclaim the margins.
+    @AppStorage("sb.tv.fillsScreen") private var fillsScreen = false
+
     @State private var showsMenu = false
     @State private var showsHint = true
+    /// The pinned board may not have arrived from iCloud yet, so restoring it
+    /// keeps retrying as boards land — but only until it succeeds once, so it
+    /// never fights the auto-cycle afterwards.
+    @State private var hasRestoredPinnedBoard = false
     @FocusState private var boardHasFocus: Bool
 
     private var selectedID: Dashboard.ID? {
@@ -285,49 +310,60 @@ struct TVRootView: View {
                 if let id = selectedID {
                     BoardView(model: model, dashboardID: id)
                 } else {
-                    BoardView(model: model, dashboardID: UUID())
+                    waitingForBoards
                 }
             }
         }
         .buttonStyle(.plain)
-        // Fill the panel, overscan margins included — a TV hung on a wall wants
-        // the whole screen, not a letterboxed card.
-        .ignoresSafeArea()
+        // Fill the panel out to whatever the TV will actually show: the whole
+        // screen when the user says the set has no overscan, otherwise the
+        // title-safe area.
+        .ignoresSafeArea(edges: fillsScreen ? .all : [])
+        .background(SBTheme.background.ignoresSafeArea())
         .focused($boardHasFocus)
         .onMoveCommand { direction in
             if direction == .down { showsMenu = true }
         }
         .onAppear {
             boardHasFocus = true
+            restorePinnedBoard()
             Task {
                 try? await Task.sleep(for: .seconds(4))
                 withAnimation { showsHint = false }
             }
         }
+        // Boards arrive from iCloud whenever they arrive; catch the pinned one
+        // the moment it shows up.
+        .onChange(of: model.store.dashboards.map(\.id)) { _, _ in
+            restorePinnedBoard()
+        }
         .overlay(alignment: .bottom) {
             if showsHint && !showsMenu {
-                Label("Swipe down or click for boards and settings", systemImage: "chevron.down")
-                    .font(.caption)
-                    .foregroundStyle(SBTheme.textSecondary)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
+                Label("Swipe down or click for boards and settings",
+                      systemImage: "chevron.down")
+                    .font(.system(size: 26, weight: .medium, design: .rounded))
+                    .foregroundStyle(SBTheme.textPrimary)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 18)
                     .background(.ultraThinMaterial, in: Capsule())
-                    .padding(.bottom, 28)
+                    .padding(.bottom, 40)
                     .transition(.opacity)
             }
         }
         .overlay(alignment: .bottomTrailing) {
             if case .connected(let name) = model.bridgeClient.connectionState {
                 Label(name, systemImage: "antenna.radiowaves.left.and.right")
-                    .font(.caption2)
+                    .font(.system(size: 20, design: .rounded))
                     .foregroundStyle(SBTheme.textSecondary)
-                    .padding(20)
+                    .padding(28)
             }
         }
         .sheet(isPresented: $showsMenu) {
             TVMenuView(model: model,
                        autoCycleSeconds: $autoCycleSeconds,
-                       isPresented: $showsMenu)
+                       fillsScreen: $fillsScreen,
+                       selectedBoardID: selectedID,
+                       onSelect: pin)
         }
         .task(id: autoCycleSeconds) {
             guard autoCycleSeconds > 0 else { return }
@@ -337,6 +373,41 @@ struct TVRootView: View {
                 advanceBoard()
             }
         }
+    }
+
+    private var waitingForBoards: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "icloud.and.arrow.down")
+                .font(.system(size: 80, weight: .light))
+                .foregroundStyle(SBTheme.accent)
+            Text("Waiting for Boards")
+                .font(SBTheme.titleFont(size: 44))
+                .foregroundStyle(SBTheme.textPrimary)
+            Text("Boards you build on your iPhone, iPad or Mac appear here over iCloud.")
+                .font(.system(size: 26, design: .rounded))
+                .foregroundStyle(SBTheme.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 900)
+        }
+    }
+
+    /// Shows a board and remembers it as this Apple TV's choice.
+    private func pin(_ id: Dashboard.ID) {
+        model.store.selectedDashboardID = id
+        pinnedBoardID = id.uuidString
+        hasRestoredPinnedBoard = true
+    }
+
+    private func restorePinnedBoard() {
+        guard !hasRestoredPinnedBoard else { return }
+        guard let pinned = UUID(uuidString: pinnedBoardID) else {
+            hasRestoredPinnedBoard = true
+            return
+        }
+        // Still not synced down; try again on the next arrival.
+        guard model.store.dashboard(id: pinned) != nil else { return }
+        model.store.selectedDashboardID = pinned
+        hasRestoredPinnedBoard = true
     }
 
     private func advanceBoard() {
@@ -349,50 +420,254 @@ struct TVRootView: View {
         }
         model.store.selectedDashboardID = boards[(index + 1) % boards.count].id
     }
-
 }
 
-/// Board switcher and settings, reached by swiping down. Dismissed with Menu.
+/// Board picker and settings, reached by swiping down. Dismissed with Menu.
+///
+/// Everything here is built for a ten-foot read: one full-width row per choice,
+/// large type, and a single scrolling column, so nothing has to be squeezed in
+/// beside anything else.
 struct TVMenuView: View {
     @Bindable var model: AppModel
     @Binding var autoCycleSeconds: Int
-    @Binding var isPresented: Bool
+    @Binding var fillsScreen: Bool
+    let selectedBoardID: Dashboard.ID?
+    let onSelect: (Dashboard.ID) -> Void
+
+    @State private var isCheckingCloud = false
+    @Environment(\.dismiss) private var dismiss
+
+    private static let cycleOptions: [(seconds: Int, title: String)] = [
+        (0, "Off"),
+        (30, "Every 30 Seconds"),
+        (60, "Every Minute"),
+        (300, "Every 5 Minutes"),
+        (900, "Every 15 Minutes"),
+    ]
 
     var body: some View {
-        VStack(spacing: 32) {
-            if model.store.dashboards.count > 1 {
-                VStack(spacing: 12) {
-                    Text("BOARDS")
-                        .font(SBTheme.titleFont(size: 14))
-                        .foregroundStyle(SBTheme.textSecondary)
-                    HStack(spacing: 16) {
-                        ForEach(model.store.dashboards) { board in
-                            Button(board.name) {
-                                model.store.selectedDashboardID = board.id
-                                isPresented = false
-                            }
-                        }
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 52) {
+                header
+                boardsSection
+                displaySection
+                cycleSection
+                footer
+            }
+            .frame(maxWidth: 1180, alignment: .leading)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 60)
+            .padding(.vertical, 50)
+        }
+        .background(SBTheme.background.ignoresSafeArea())
+    }
+
+    // MARK: Sections
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Status Board")
+                .font(SBTheme.titleFont(size: 58))
+                .foregroundStyle(SBTheme.textPrimary)
+            Text(currentBoardName.map { "Showing \($0)" } ?? "No board selected")
+                .font(.system(size: 30, weight: .medium, design: .rounded))
+                .foregroundStyle(SBTheme.accent)
+                .lineLimit(1)
+        }
+    }
+
+    private var boardsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader("Boards", detail: cloudSummary, isWarning: cloudIsUnavailable)
+            ForEach(model.store.dashboards) { board in
+                TVMenuRow(title: board.name,
+                          subtitle: subtitle(for: board),
+                          isSelected: board.id == selectedBoardID) {
+                    onSelect(board.id)
+                    dismiss()
                 }
             }
-
-            Picker("Cycle dashboards", selection: $autoCycleSeconds) {
-                Text("Off").tag(0)
-                Text("Every 30 seconds").tag(30)
-                Text("Every minute").tag(60)
-                Text("Every 5 minutes").tag(300)
+            TVMenuRow(title: isCheckingCloud ? "Checking iCloud…" : "Check iCloud for Boards",
+                      subtitle: "Fetch boards added or changed on your other devices",
+                      systemImage: "arrow.clockwise.icloud",
+                      isBusy: isCheckingCloud) {
+                Task {
+                    isCheckingCloud = true
+                    await model.sync.syncNow()
+                    isCheckingCloud = false
+                }
             }
-            .pickerStyle(.inline)
-            .frame(maxWidth: 700)
-
-            Text("Dashboards and their data sync from your other devices via iCloud, and live data arrives from the Mac bridge.")
-                .font(.callout)
-                .foregroundStyle(SBTheme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 800)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(SBTheme.background.ignoresSafeArea())
+    }
+
+    private var displaySection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader("Screen Fit",
+                          detail: "Use Fit Inside TV Edges if panels are cut off")
+            TVMenuRow(title: "Fit Inside TV Edges",
+                      subtitle: "Keeps every panel clear of the edges your TV may crop",
+                      isSelected: !fillsScreen) {
+                fillsScreen = false
+            }
+            TVMenuRow(title: "Fill the Whole Screen",
+                      subtitle: "Edge to edge, for screens that show every pixel",
+                      isSelected: fillsScreen) {
+                fillsScreen = true
+            }
+        }
+    }
+
+    private var cycleSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader("Cycle Boards",
+                          detail: "Rotate through every board automatically")
+            ForEach(Self.cycleOptions, id: \.seconds) { option in
+                TVMenuRow(title: option.title,
+                          isSelected: autoCycleSeconds == option.seconds) {
+                    autoCycleSeconds = option.seconds
+                }
+            }
+        }
+    }
+
+    private var footer: some View {
+        Text("Boards and their panel data sync from your iPhone, iPad and Mac over iCloud, and live values arrive from the Mac bridge. Arrange this board for the TV from Device Preview on your Mac, iPad or iPhone.")
+            .font(.system(size: 24, design: .rounded))
+            .foregroundStyle(SBTheme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 8)
+    }
+
+    private func sectionHeader(_ title: String, detail: String?,
+                               isWarning: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(SBTheme.titleFont(size: 24))
+                .foregroundStyle(SBTheme.textSecondary)
+                .tracking(2)
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 24, design: .rounded))
+                    .foregroundStyle(isWarning ? SBTheme.warn : SBTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    // MARK: Text
+
+    private var currentBoardName: String? {
+        guard let selectedBoardID else { return nil }
+        return model.store.dashboard(id: selectedBoardID)?.name
+    }
+
+    private var cloudIsUnavailable: Bool {
+        if case .unavailable = model.sync.state { return true }
+        return false
+    }
+
+    private var cloudSummary: String {
+        switch model.sync.state {
+        case .unavailable(let reason):
+            return reason
+        case .syncing:
+            return "Checking iCloud…"
+        case .idle:
+            let count = model.store.dashboards.count
+            let boards = "\(count) board\(count == 1 ? "" : "s") synced"
+            guard let date = model.sync.lastSyncDate else { return boards }
+            return "\(boards) · Checked \(Self.relative.localizedString(for: date, relativeTo: Date()))"
+        }
+    }
+
+    private static let relative: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
+
+    private func subtitle(for board: Dashboard) -> String {
+        let shown = board.panels(for: .tv).count
+        let total = board.panels.count
+        let panels = shown == total
+            ? "\(total) panel\(total == 1 ? "" : "s")"
+            : "\(shown) of \(total) panels shown here"
+        let updated = Self.relative.localizedString(for: board.modifiedAt, relativeTo: Date())
+        return "\(panels) · Updated \(updated)"
+    }
+}
+
+/// One full-width, focusable choice. Rows invert to a light background when
+/// focused so the label stays legible from across the room, and titles wrap
+/// rather than truncate.
+private struct TVMenuRow: View {
+    var title: String
+    var subtitle: String? = nil
+    var systemImage: String? = nil
+    var isSelected: Bool = false
+    var isBusy: Bool = false
+    var action: () -> Void
+
+    @FocusState private var isFocused: Bool
+
+    private var icon: String {
+        systemImage ?? (isSelected ? "checkmark.circle.fill" : "circle")
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: 26) {
+                Image(systemName: icon)
+                    .font(.system(size: 32))
+                    .foregroundStyle(iconColor)
+                    .frame(width: 40, alignment: .leading)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 34, weight: .semibold, design: .rounded))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
+                        .multilineTextAlignment(.leading)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 24, design: .rounded))
+                            .foregroundStyle(secondaryColor)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                }
+                Spacer(minLength: 0)
+                if isBusy {
+                    ProgressView()
+                        .controlSize(.large)
+                }
+            }
+            .foregroundStyle(isFocused ? SBTheme.background : SBTheme.textPrimary)
+            .padding(.horizontal, 34)
+            .padding(.vertical, 26)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(isFocused ? SBTheme.textPrimary : SBTheme.panelBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(isSelected && !isFocused ? SBTheme.accent : .clear,
+                                  lineWidth: 3)
+            )
+            .scaleEffect(isFocused ? 1.02 : 1)
+        }
+        .buttonStyle(.plain)
+        .focused($isFocused)
+        .animation(.easeOut(duration: 0.15), value: isFocused)
+    }
+
+    private var iconColor: Color {
+        if isFocused { return isSelected ? SBTheme.background : SBTheme.background.opacity(0.5) }
+        return isSelected ? SBTheme.accent : SBTheme.textSecondary
+    }
+
+    private var secondaryColor: Color {
+        isFocused ? SBTheme.background.opacity(0.7) : SBTheme.textSecondary
     }
 }
 #endif

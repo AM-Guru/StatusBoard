@@ -181,6 +181,60 @@ public final class DashboardStore {
         return inserted
     }
 
+    // MARK: - Per-device layouts
+
+    /// Moves or resizes a panel on one device's layout, leaving the shared
+    /// layout — and therefore every other device — untouched.
+    public func setPanelFrame(_ frame: GridRect, panelID: Panel.ID,
+                              in dashboardID: Dashboard.ID, on device: SBDeviceClass) {
+        guard var board = dashboard(id: dashboardID) else { return }
+        let name = board.panels.first { $0.id == panelID }?.title ?? "Panel"
+        board.setFrame(frame, for: panelID, on: device)
+        update(board, undoActionName: "Move \(name) on \(device.displayName)")
+    }
+
+    public func setPanelHidden(_ hidden: Bool, panelID: Panel.ID,
+                               in dashboardID: Dashboard.ID, on device: SBDeviceClass) {
+        guard var board = dashboard(id: dashboardID) else { return }
+        let name = board.panels.first { $0.id == panelID }?.title ?? "Panel"
+        board.setHidden(hidden, for: panelID, on: device)
+        update(board,
+               undoActionName: "\(hidden ? "Hide" : "Show") \(name) on \(device.displayName)")
+    }
+
+    public func setGrid(_ grid: BoardGrid, in dashboardID: Dashboard.ID,
+                        on device: SBDeviceClass) {
+        guard var board = dashboard(id: dashboardID) else { return }
+        board.setGrid(grid, on: device)
+        update(board, undoActionName: "Resize \(device.displayName) Grid")
+    }
+
+    public func beginCustomLayout(in dashboardID: Dashboard.ID, on device: SBDeviceClass) {
+        guard var board = dashboard(id: dashboardID),
+              !board.hasCustomLayout(for: device) else { return }
+        board.beginCustomLayout(for: device)
+        update(board, undoActionName: "Customize \(device.displayName) Layout")
+    }
+
+    public func resetLayout(in dashboardID: Dashboard.ID, on device: SBDeviceClass) {
+        guard var board = dashboard(id: dashboardID) else { return }
+        board.resetLayout(for: device)
+        update(board, undoActionName: "Reset \(device.displayName) Layout")
+    }
+
+    public func copyLayout(in dashboardID: Dashboard.ID,
+                           from source: SBDeviceClass, to target: SBDeviceClass) {
+        guard var board = dashboard(id: dashboardID) else { return }
+        board.copyLayout(from: source, to: target)
+        update(board, undoActionName: "Copy \(source.displayName) Layout")
+    }
+
+    public func autoArrange(in dashboardID: Dashboard.ID, on device: SBDeviceClass) {
+        guard var board = dashboard(id: dashboardID) else { return }
+        board.autoArrange(for: device)
+        update(board, undoActionName: "Auto-Arrange for \(device.displayName)")
+    }
+
     public func removePanel(id: Panel.ID, from dashboardID: Dashboard.ID) {
         guard var board = dashboard(id: dashboardID) else { return }
         let name = board.panels.first { $0.id == id }?.title ?? "Panel"

@@ -48,6 +48,12 @@ public struct StatusBoardCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: .command)
 
+            Button("Preview on Another Device…") {
+                model.showsDeviceSimulator = true
+            }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .disabled(model.store.selectedDashboard == nil)
+
             Divider()
 
             Button("Duplicate Panel") {

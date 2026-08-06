@@ -988,3 +988,138 @@ struct WatchLayoutTests {
         }
     }
 }
+
+@Suite struct DeviceLayoutTests {
+    private func board() -> Dashboard {
+        var board = Dashboard(name: "Test", grid: BoardGrid(columns: 4, rows: 2))
+        board.panels = [
+            Panel(kind: .clock, title: "Clock", frame: GridRect(x: 0, y: 0, width: 2, height: 1)),
+            Panel(kind: .text, title: "Note", frame: GridRect(x: 2, y: 0, width: 2, height: 1)),
+        ]
+        return board
+    }
+
+    @Test func devicesWithoutOverridesShareOneLayout() {
+        let board = board()
+        for device in SBDeviceClass.allCases {
+            #expect(board.hasCustomLayout(for: device) == false)
+            #expect(board.panels(for: device).map(\.frame) == board.panels.map(\.frame))
+            #expect(board.grid(for: device).columns == board.grid.columns)
+        }
+    }
+
+    @Test func movingAPanelOnOneDeviceLeavesTheOthersAlone() {
+        var board = board()
+        let clock = board.panels[0]
+        board.setFrame(GridRect(x: 0, y: 1, width: 4, height: 1), for: clock.id, on: .tv)
+
+        #expect(board.frame(for: clock, device: .tv) == GridRect(x: 0, y: 1, width: 4, height: 1))
+        #expect(board.frame(for: clock, device: .mac) == clock.frame)
+        #expect(board.panels[0].frame == clock.frame)   // the shared layout is untouched
+        #expect(board.hasCustomLayout(for: .mac) == false)
+    }
+
+    @Test func hidingAPanelRemovesItFromThatDeviceOnly() {
+        var board = board()
+        let note = board.panels[1]
+        board.setHidden(true, for: note.id, on: .phone)
+
+        #expect(board.panels(for: .phone).count == 1)
+        #expect(board.panels(for: .tv).count == 2)
+        #expect(board.isHidden(note.id, on: .phone))
+        #expect(board.isHidden(note.id, on: .tv) == false)
+    }
+
+    /// The bug this guards against: a panel sitting below the stored row count
+    /// would be laid out past the bottom of the screen and never seen.
+    @Test func gridAlwaysCoversEveryPanelItShows() {
+        var board = board()
+        board.panels.append(Panel(kind: .text, title: "Low",
+                                  frame: GridRect(x: 0, y: 6, width: 2, height: 2)))
+        #expect(board.grid.rows == 2)              // stored grid is too short…
+        #expect(board.grid(for: .tv).rows == 8)    // …but nothing is cut off
+    }
+
+    @Test func resettingGoesBackToTheSharedLayout() {
+        var board = board()
+        let clock = board.panels[0]
+        board.setFrame(GridRect(x: 3, y: 1, width: 1, height: 1), for: clock.id, on: .tv)
+        #expect(board.hasCustomLayout(for: .tv))
+
+        board.resetLayout(for: .tv)
+        #expect(board.hasCustomLayout(for: .tv) == false)
+        #expect(board.frame(for: clock, device: .tv) == clock.frame)
+    }
+
+    @Test func customizingStartsFromWhatTheDeviceShowsToday() {
+        var board = board()
+        board.beginCustomLayout(for: .tv)
+        #expect(board.panels(for: .tv).map(\.frame) == board.panels.map(\.frame))
+        #expect(board.grid(for: .tv) == board.grid)
+    }
+
+    @Test func autoArrangeKeepsEveryVisiblePanelInsideTheGrid() {
+        var board = board()
+        board.panels.append(Panel(kind: .graph, title: "Wide",
+                                  frame: GridRect(x: 0, y: 1, width: 12, height: 2)))
+        board.setHidden(true, for: board.panels[1].id, on: .phone)
+        board.autoArrange(for: .phone)
+
+        let grid = board.grid(for: .phone)
+        let shown = board.panels(for: .phone)
+        #expect(shown.count == 2)                                  // the hidden one stays hidden
+        for panel in shown {
+            #expect(panel.frame.x + panel.frame.width <= grid.columns)
+            #expect(panel.frame.y + panel.frame.height <= grid.rows)
+        }
+    }
+
+    @Test func copyingALayoutMirrorsTheSource() {
+        var board = board()
+        let clock = board.panels[0]
+        board.setFrame(GridRect(x: 2, y: 1, width: 2, height: 1), for: clock.id, on: .tv)
+        board.copyLayout(from: .tv, to: .pad)
+        #expect(board.frame(for: clock, device: .pad) == board.frame(for: clock, device: .tv))
+
+        // Copying from a device that follows the shared layout clears the target.
+        board.copyLayout(from: .mac, to: .pad)
+        #expect(board.hasCustomLayout(for: .pad) == false)
+    }
+
+    /// Boards written before per-device layouts existed are already in iCloud;
+    /// they must still decode.
+    @Test func boardsSavedBeforeDeviceLayoutsStillDecode() throws {
+        let legacy = """
+        {
+          "id": "8B2A5E5E-0F9E-4F1E-9E0E-9B0B1C2D3E4F",
+          "name": "Legacy",
+          "grid": {"columns": 4, "rows": 2},
+          "panels": [],
+          "createdAt": "2026-01-01T00:00:00Z",
+          "modifiedAt": "2026-01-01T00:00:00Z"
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let board = try decoder.decode(Dashboard.self, from: Data(legacy.utf8))
+        #expect(board.name == "Legacy")
+        #expect(board.deviceLayouts.isEmpty)
+        #expect(board.hasCustomLayout(for: .tv) == false)
+    }
+
+    @Test func deviceLayoutsSurviveARoundtrip() throws {
+        var original = board()
+        original.setFrame(GridRect(x: 1, y: 1, width: 2, height: 1),
+                          for: original.panels[0].id, on: .tv)
+        original.setHidden(true, for: original.panels[1].id, on: .tv)
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(Dashboard.self, from: try encoder.encode(original))
+
+        #expect(decoded.layout(for: .tv) == original.layout(for: .tv))
+        #expect(decoded.panels(for: .tv).count == 1)
+    }
+}

@@ -1,5 +1,6 @@
 import Foundation
 import CloudKit
+import Observation
 #if os(macOS)
 import Security
 #endif
@@ -7,6 +8,7 @@ import Security
 /// Syncs dashboards through the user's private CloudKit database using
 /// CKSyncEngine. Each dashboard is one record carrying its JSON payload.
 @MainActor
+@Observable
 public final class CloudSyncEngine: NSObject {
     public enum State: Equatable {
         case idle
@@ -15,11 +17,14 @@ public final class CloudSyncEngine: NSObject {
     }
 
     public private(set) var state: State = .idle
+    /// When boards last arrived from — or were last checked against — iCloud.
+    /// Shown on Apple TV, where it's the only sign sync is working.
+    public private(set) var lastSyncDate: Date?
 
-    private let store: DashboardStore
-    private var engine: CKSyncEngine?
-    private let zoneID = CKRecordZone.ID(zoneName: "StatusBoards")
-    private let stateURL: URL
+    @ObservationIgnored private let store: DashboardStore
+    @ObservationIgnored private var engine: CKSyncEngine?
+    @ObservationIgnored private let zoneID = CKRecordZone.ID(zoneName: "StatusBoards")
+    @ObservationIgnored private let stateURL: URL
 
     private static let recordType: CKRecord.RecordType = "Dashboard"
     private static let payloadKey = "payload"
@@ -65,7 +70,10 @@ public final class CloudSyncEngine: NSObject {
     public func syncNow() async {
         guard let engine else { return }
         state = .syncing
-        defer { state = .idle }
+        defer {
+            state = .idle
+            lastSyncDate = Date()
+        }
         try? await engine.fetchChanges()
         try? await engine.sendChanges()
     }
@@ -147,6 +155,7 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
             }
 
         case .fetchedRecordZoneChanges(let changes):
+            lastSyncDate = Date()
             for modification in changes.modifications {
                 if let dashboard = decodeDashboard(from: modification.record) {
                     store.applyRemote(dashboard)

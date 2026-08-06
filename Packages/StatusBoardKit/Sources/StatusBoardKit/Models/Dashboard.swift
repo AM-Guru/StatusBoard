@@ -8,15 +8,34 @@ public struct Dashboard: Identifiable, Codable, Hashable, Sendable {
     public var panels: [Panel]
     public var createdAt: Date
     public var modifiedAt: Date
+    /// Per-screen arrangements, keyed by `SBDeviceClass.rawValue`. A device with
+    /// no entry here follows `grid` and each panel's own `frame`.
+    public var deviceLayouts: [String: BoardLayout]
 
     public init(id: UUID = UUID(), name: String, grid: BoardGrid = BoardGrid(),
-                panels: [Panel] = [], createdAt: Date = Date(), modifiedAt: Date = Date()) {
+                panels: [Panel] = [], createdAt: Date = Date(), modifiedAt: Date = Date(),
+                deviceLayouts: [String: BoardLayout] = [:]) {
         self.id = id
         self.name = name
         self.grid = grid
         self.panels = panels
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
+        self.deviceLayouts = deviceLayouts
+    }
+
+    /// Hand-written so boards saved before per-device layouts existed — on disk
+    /// here or already in iCloud — still decode.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        grid = try container.decode(BoardGrid.self, forKey: .grid)
+        panels = try container.decode([Panel].self, forKey: .panels)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        modifiedAt = try container.decode(Date.self, forKey: .modifiedAt)
+        deviceLayouts = try container.decodeIfPresent([String: BoardLayout].self,
+                                                      forKey: .deviceLayouts) ?? [:]
     }
 
     /// The first slot that fits, or nil when the board is full.
