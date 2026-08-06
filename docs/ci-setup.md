@@ -39,6 +39,30 @@ Managing it:
 ssh media 'cd ~/actions-runner-statusboard && ./svc.sh status'
 ```
 
+## Build numbers and beta submission
+
+Build numbers are **`YYMMDD.R`** — `260806.2` is the second build made on
+6 August 2026. `Scripts/next-build-number.py` picks `R` by asking App Store
+Connect what already exists for today, so CI, a laptop and a re-run never
+disagree.
+
+> `CFBundleVersion` is compared component by component and must increase within
+> a marketing version. `260806` is *lower* than the old timestamp style
+> (`202608061800`), so adopting this format required moving
+> `MARKETING_VERSION` to **1.1**. Changing the format again means bumping the
+> marketing version again.
+
+After a successful upload, `Scripts/submit-beta.py`:
+
+1. waits for App Store Connect to finish processing each platform's build,
+2. sets **What to Test** from the commit message that produced it,
+3. adds the build to the **External Testers** group, and
+4. submits it for Beta App Review, which external testing requires per version.
+
+A build still processing when the timeout expires is reported and skipped
+rather than failing the run — the upload already succeeded. Override the group
+with the `BETA_GROUP` repository variable.
+
 ## When the workflow runs
 
 | Event | Test | Build | Upload |
