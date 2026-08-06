@@ -315,30 +315,40 @@ struct TickerView: View {
 
 struct StatusContentView: View {
     let statuses: [ServiceStatus]
+    @Environment(\.isStaticRender) private var isStaticRender
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                ForEach(statuses) { status in
-                    HStack(spacing: 8) {
-                        Circle()
-                            .fill(status.state.color)
-                            .frame(width: 10, height: 10)
-                            .shadow(color: status.state.color.opacity(0.8), radius: 4)
-                        Text(status.name)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(SBTheme.textPrimary)
-                        Spacer()
-                        if let latency = status.latencyMS {
-                            Text("\(Int(latency)) ms")
-                                .font(SBTheme.lcdFont(size: 12))
-                                .foregroundStyle(SBTheme.textSecondary)
-                        }
+        // ImageRenderer rasterises a ScrollView's content as empty, so an
+        // exported board would lose this panel entirely. Drop the scrolling
+        // wrapper when the board is being rendered to an image.
+        if isStaticRender {
+            list.frame(maxHeight: .infinity, alignment: .top)
+        } else {
+            ScrollView { list }
+        }
+    }
+
+    private var list: some View {
+        VStack(spacing: 8) {
+            ForEach(statuses) { status in
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(status.state.color)
+                        .frame(width: 10, height: 10)
+                        .shadow(color: status.state.color.opacity(0.8), radius: 4)
+                    Text(status.name)
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(SBTheme.textPrimary)
+                    Spacer()
+                    if let latency = status.latencyMS {
+                        Text("\(Int(latency)) ms")
+                            .font(SBTheme.lcdFont(size: 12))
+                            .foregroundStyle(SBTheme.textSecondary)
                     }
                 }
             }
-            .padding(10)
         }
+        .padding(10)
     }
 }
 

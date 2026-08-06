@@ -3,18 +3,8 @@ import SwiftUI
 import CoreTransferable
 import UniformTypeIdentifiers
 
-/// Environment flag set while rendering a board to an image, so live views
-/// (web clips) substitute static content.
-private struct StaticRenderKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
-extension EnvironmentValues {
-    public var isStaticRender: Bool {
-        get { self[StaticRenderKey.self] }
-        set { self[StaticRenderKey.self] = newValue }
-    }
-}
+// `isStaticRender` lives in StaticRender.swift, outside this file's platform
+// guard, because the views that consult it are shared with tvOS and watchOS.
 
 /// Shareable board poster — renders the board to a 1080p PNG on demand when
 /// the user picks a share destination.
