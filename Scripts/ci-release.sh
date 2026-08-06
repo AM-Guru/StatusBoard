@@ -49,7 +49,12 @@ if [[ "${APP_STORE_DISTRIBUTION}" != Apple\ Distribution:*"(${APPLE_TEAM_ID})" ]
 fi
 
 PLATFORMS="${PLATFORMS:-all}"
-BUILD_NUMBER="${BUILD_NUMBER:-$(date +%Y%m%d%H%M)}"
+# YYMMDD.R, with R the next unused revision for today. Derived here rather
+# than in the workflow because it needs the App Store Connect key.
+if [[ -z "${BUILD_NUMBER:-}" ]]; then
+  export ASC_PRIVATE_KEY_PATH="${HOME}/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+  BUILD_NUMBER="$(python3 Scripts/next-build-number.py)"
+fi
 DO_UPLOAD="${DO_UPLOAD:-false}"
 
 WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/statusboard-release.XXXXXX")"
@@ -142,3 +147,9 @@ ARGS=(--build-number "${BUILD_NUMBER}" --platforms "${PLATFORMS}")
 
 echo "▸ Scripts/release.sh ${ARGS[*]}"
 ./Scripts/release.sh "${ARGS[@]}"
+
+# Put the new builds in front of testers, with the commit as release notes.
+if [[ "${DO_UPLOAD}" == "true" ]]; then
+  BUILD_NUMBER="${BUILD_NUMBER}" BETA_GROUP="${BETA_GROUP:-External Testers}" \
+    python3 Scripts/submit-beta.py || echo "  (beta submission reported a problem; the uploads themselves succeeded)"
+fi

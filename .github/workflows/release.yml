@@ -121,11 +121,9 @@ jobs:
           TVOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.TVOS_PROVISIONING_PROFILE_BASE64 }}
         run: Scripts/validate-release-configuration.sh
 
-      - name: Derive build number
-        id: build_number
-        shell: bash
-        run: echo "value=$(date +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
-
+      # ci-release.sh derives the build number (YYMMDD.R) itself, because that
+      # needs the App Store Connect key, and submits the result to the beta
+      # group with the commit message as release notes.
       - name: Build, sign and upload
         shell: bash
         env:
@@ -135,8 +133,8 @@ jobs:
           APP_STORE_DISTRIBUTION_P12_BASE64: ${{ secrets.APP_STORE_DISTRIBUTION_P12_BASE64 }}
           APP_STORE_DISTRIBUTION_P12_PASSWORD: ${{ secrets.APP_STORE_DISTRIBUTION_P12_PASSWORD }}
           TVOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.TVOS_PROVISIONING_PROFILE_BASE64 }}
-          BUILD_NUMBER: ${{ steps.build_number.outputs.value }}
           PLATFORMS: ${{ github.event.inputs.platforms || 'all' }}
+          BETA_GROUP: ${{ vars.BETA_GROUP || 'External Testers' }}
           UPLOAD_INPUT: ${{ github.event.inputs.upload }}
         run: |
           set -euo pipefail
@@ -155,7 +153,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: StatusBoard-${{ steps.build_number.outputs.value }}
+          name: StatusBoard-${{ github.run_number }}
           path: |
             Artifacts/*.ipa
             Artifacts/*.pkg
