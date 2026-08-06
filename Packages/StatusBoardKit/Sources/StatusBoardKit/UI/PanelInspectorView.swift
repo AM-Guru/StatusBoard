@@ -5,6 +5,8 @@ import SwiftUI
 public struct PanelInspectorView: View {
     let model: AppModel
     let dashboardID: Dashboard.ID
+    /// Kept so unsaved edits can be detected before the sheet is swiped away.
+    private let original: Panel
 
     @State private var draft: Panel
     @State private var showingRegionPicker = false
@@ -17,6 +19,7 @@ public struct PanelInspectorView: View {
     public init(model: AppModel, panel: Panel, dashboardID: Dashboard.ID) {
         self.model = model
         self.dashboardID = dashboardID
+        self.original = panel
         self._draft = State(initialValue: panel)
     }
 
@@ -42,6 +45,10 @@ public struct PanelInspectorView: View {
             }
             .formStyle(.grouped)
             .navigationTitle(draft.kind.displayName)
+            // Edits only reach the panel through Save. Without this, swiping
+            // the sheet down throws away everything just typed — which reads
+            // as "the setting won't change".
+            .interactiveDismissDisabled(draft != original)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -277,7 +284,7 @@ public struct PanelInspectorView: View {
 
         case .grades, .assignments:
             Section(draft.kind == .grades ? "Grades" : "Assignments") {
-                TextField("Canvas URL (https://learn2.k12.com)",
+                TextField("Your Canvas address, e.g. learn2.k12.com",
                           text: optionalString(canvasConnector.projectURL))
                     .autocorrectionOff()
                 SecureField("Access token", text: optionalString(canvasConnector.token))
@@ -418,7 +425,7 @@ public struct PanelInspectorView: View {
 
         case .canvas:
             Section("Canvas") {
-                TextField("Canvas URL (https://school.instructure.com)",
+                TextField("Your Canvas address, e.g. learn2.k12.com",
                           text: optionalString(connector.projectURL))
                     .autocorrectionOff()
                 SecureField("Access token", text: optionalString(connector.token))
@@ -432,7 +439,7 @@ public struct PanelInspectorView: View {
                         connector.wrappedValue.mode = CanvasSource.Mode.dueToday.rawValue
                     }
                 }
-                Text("Create a token in Canvas → Account → Settings → “+ New Access Token”. It's stored in your dashboard, which syncs only through your private iCloud database.")
+                Text("Use your school's own Canvas address — for K12/Stride that is learn2.k12.com, not school.instructure.com. Create a token at that address under Account → Settings → “+ New Access Token”. If your school has disabled tokens, use a Schedule panel and sign in there instead. The token is stored in your dashboard, which syncs only through your private iCloud database.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

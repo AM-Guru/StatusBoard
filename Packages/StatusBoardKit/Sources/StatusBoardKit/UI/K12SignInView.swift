@@ -14,6 +14,7 @@ public struct K12SignInView: View {
 
     @State private var controller = K12SignInController()
     @State private var isChecking = false
+    @State private var errorMessage: String?
     @Environment(\.dismiss) private var dismiss
 
     public init(portal: String = K12Session.defaultPortal, onFinish: @escaping () -> Void) {
@@ -25,6 +26,19 @@ public struct K12SignInView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 banner
+                if let errorMessage {
+                    Divider()
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(errorMessage)
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(10)
+                    .background(.orange.opacity(0.12))
+                }
                 Divider()
                 PlatformWebViewWrapper(webView: controller.webView)
             }
@@ -64,16 +78,37 @@ public struct K12SignInView: View {
 
     /// Adopts whatever session the web view ended up with, then verifies it by
     /// making a real API call before claiming success.
+    ///
+    /// A failure used to do nothing at all — `try?` swallowed the reason, the
+    /// button flicked back to "Done", and there was no way to tell what went
+    /// wrong. Every path now either succeeds or says why.
     private func finish() async {
         isChecking = true
         defer { isChecking = false }
+        errorMessage = nil
         await K12Session.shared.adoptCookies(from: controller.webView.configuration.websiteDataStore)
-        // Prove it works rather than assuming.
-        if (try? await K12Session.shared.json(path: "/api/canvas/events/classes",
-                                              portal: portal)) != nil {
-            onFinish()
-            dismiss()
+
+        // OLS and Canvas answer on different paths, and this sheet is used for
+        // both. Either one proving the session is good is enough.
+        let probes = ["/api/canvas/events/classes", "/api/v1/users/self"]
+        var lastError: Error?
+        for path in probes {
+            do {
+                _ = try await K12Session.shared.json(path: path, portal: portal)
+                onFinish()
+                dismiss()
+                return
+            } catch {
+                lastError = error
+            }
         }
+
+        let reason = (lastError as? LocalizedError)?.errorDescription
+            ?? lastError?.localizedDescription ?? "no response"
+        errorMessage = """
+            Signed in, but \(portal) did not accept the saved session (\(reason)).
+            Check the portal address above is the one you actually signed in to,             then tap Done again. Your cookies were kept, so nothing is lost.
+            """
     }
 }
 
