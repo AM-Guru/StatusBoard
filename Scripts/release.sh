@@ -116,18 +116,26 @@ upload() {                      # upload <file> <platform>
     --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
 }
 
-# tvOS signs manually (see project.yml), so its export needs the profile named
-# explicitly; the other platforms stay on automatic signing.
-TVOS_PROFILE="Status Board tvOS App Store"
+# Every Release configuration signs manually (see project.yml), so each export
+# has to name the profile for every bundle id it contains.
+IOS_PROFILES='  <dict>
+    <key>guru.am.StatusBoard</key><string>Status Board iOS App Store</string>
+    <key>guru.am.StatusBoard.widgets</key><string>Status Board iOS Widgets App Store</string>
+    <key>guru.am.StatusBoard.watchkitapp</key><string>Status Board Watch App Store</string>
+    <key>guru.am.StatusBoard.watchkitapp.widgets</key><string>Status Board Watch Widgets App Store</string>
+  </dict>'
+TVOS_PROFILES='  <dict>
+    <key>guru.am.StatusBoard</key><string>Status Board tvOS App Store</string>
+  </dict>' 
 
-make_export_plist() {           # make_export_plist <path> <method> <destination> [manual-profile]
-  local manual_profile="${4:-}"
+make_export_plist() {           # make_export_plist <path> <method> <destination> [profiles-dict]
+  local profiles="${4:-}"
   local signing_block="  <key>signingStyle</key><string>automatic</string>"
-  if [[ -n "$manual_profile" ]]; then
+  if [[ -n "$profiles" ]]; then
     signing_block="  <key>signingStyle</key><string>manual</string>
   <key>signingCertificate</key><string>Apple Distribution</string>
   <key>provisioningProfiles</key>
-  <dict><key>guru.am.StatusBoard</key><string>$manual_profile</string></dict>"
+$profiles"
   fi
   cat > "$1" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -152,7 +160,7 @@ wants() {                       # wants <platform>
   [[ "$PLATFORMS" == "all" || "$PLATFORMS" == "both" || "$PLATFORMS" == "$1" ]]
 }
 
-ship() {                        # ship <scheme> <destination> <slug> <altool type> <ext> [manual-profile]
+ship() {                        # ship <scheme> <destination> <slug> <altool type> <ext> [profiles-dict]
   local scheme="$1" destination="$2" slug="$3" type="$4" ext="$5" manual_profile="${6:-}"
   local archive_path="$ARTIFACTS/$scheme.xcarchive"
   archive "$scheme" "$destination" "$archive_path"
@@ -169,8 +177,8 @@ if [[ "$PLATFORMS" == "both" ]]; then
   echo "  note: --platforms both now means all three (iOS, macOS, tvOS)"
 fi
 
-wants ios   && ship "StatusBoard-iOS"   "generic/platform=iOS"   ios   ios   ipa
+wants ios   && ship "StatusBoard-iOS"   "generic/platform=iOS"   ios   ios   ipa "$IOS_PROFILES"
 wants macos && ship "StatusBoard-macOS" "generic/platform=macOS" macos macos pkg
-wants tvos  && ship "StatusBoard-tvOS"  "generic/platform=tvOS"  tvos  appletvos ipa "$TVOS_PROFILE"
+wants tvos  && ship "StatusBoard-tvOS"  "generic/platform=tvOS"  tvos  appletvos ipa "$TVOS_PROFILES"
 
 echo "✓ Done. Artifacts in $ARTIFACTS"

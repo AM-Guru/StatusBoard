@@ -83,6 +83,15 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         INFOPLIST_KEY_UIStatusBarHidden: YES
+      configs:
+        # Release signs manually: on the CI machine automatic
+        # signing resolves a *development* profile and then signs
+        # with a development identity that cannot be unlocked
+        # headlessly. Scripts/fetch-profiles.py installs these.
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: Status Board iOS App Store
     entitlements:
       path: Apps/iOS/StatusBoard.entitlements
       properties:
@@ -178,6 +187,15 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard.widgets
         SKIP_INSTALL: YES
+      configs:
+        # Release signs manually: on the CI machine automatic
+        # signing resolves a *development* profile and then signs
+        # with a development identity that cannot be unlocked
+        # headlessly. Scripts/fetch-profiles.py installs these.
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: Status Board iOS Widgets App Store
     entitlements:
       path: Apps/Widgets/Widgets-iOS.entitlements
       properties:
@@ -241,6 +259,15 @@ targets:
         # which is what lets it ship inside the same App Store listing.
         PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard.watchkitapp
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        # Release signs manually: on the CI machine automatic
+        # signing resolves a *development* profile and then signs
+        # with a development identity that cannot be unlocked
+        # headlessly. Scripts/fetch-profiles.py installs these.
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: Status Board Watch App Store
     entitlements:
       path: Apps/watchOS/StatusBoard.entitlements
       properties:
@@ -285,6 +312,15 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard.watchkitapp.widgets
         SKIP_INSTALL: YES
+      configs:
+        # Release signs manually: on the CI machine automatic
+        # signing resolves a *development* profile and then signs
+        # with a development identity that cannot be unlocked
+        # headlessly. Scripts/fetch-profiles.py installs these.
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: Status Board Watch Widgets App Store
     entitlements:
       path: Apps/Widgets/Widgets-watchOS.entitlements
       properties:

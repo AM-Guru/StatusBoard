@@ -13,8 +13,6 @@
 #   APP_STORE_DISTRIBUTION_P12_PASSWORD  password that .p12 was exported with
 #   ASC_KEY_ID, ASC_ISSUER_ID            App Store Connect API key identifiers
 #   ASC_PRIVATE_KEY                      the .p8 contents, PEM as-is
-#   TVOS_PROVISIONING_PROFILE_BASE64     base64 .mobileprovision for tvOS,
-#                                        which signs manually (see docs/ci-setup.md)
 #
 # Required configuration (repository variables):
 #   APPLE_TEAM_ID          10-character team id
@@ -60,8 +58,6 @@ KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
 P12_PATH="${WORK_DIR}/distribution.p12"
 ASC_KEY_DIR="${HOME}/.appstoreconnect/private_keys"
 ASC_KEY_PATH="${ASC_KEY_DIR}/AuthKey_${ASC_KEY_ID}.p8"
-PROFILE_DIR="${HOME}/Library/Developer/Xcode/UserData/Provisioning Profiles"
-STAGED_PROFILE=""
 ORIGINAL_KEYCHAINS=()
 
 while IFS= read -r keychain; do
@@ -79,7 +75,6 @@ cleanup() {
   fi
   security delete-keychain "${KEYCHAIN_PATH}" >/dev/null 2>&1
   rm -f "${ASC_KEY_PATH}"
-  [[ -n "${STAGED_PROFILE}" ]] && rm -f "${STAGED_PROFILE}"
   rm -rf "${WORK_DIR}"
   exit "${exit_code}"
 }
@@ -128,16 +123,12 @@ if ! grep -q "BEGIN PRIVATE KEY" "${ASC_KEY_PATH}"; then
 fi
 echo "  ✓ App Store Connect key ${ASC_KEY_ID}"
 
-# tvOS signs manually, so its profile has to be on disk before xcodebuild runs.
-if [[ -n "${TVOS_PROVISIONING_PROFILE_BASE64:-}" ]]; then
-  mkdir -p "${PROFILE_DIR}"
-  STAGED_PROFILE="${PROFILE_DIR}/statusboard-ci-tvos.mobileprovision"
-  printf '%s' "${TVOS_PROVISIONING_PROFILE_BASE64}" | /usr/bin/base64 -D > "${STAGED_PROFILE}"
-  profile_name="$(security cms -D -i "${STAGED_PROFILE}" 2>/dev/null \
-    | plutil -extract Name raw - -o - 2>/dev/null || true)"
-  echo "  ✓ tvOS profile: ${profile_name:-installed}"
-elif [[ "${PLATFORMS}" == "all" || "${PLATFORMS}" == "tvos" ]]; then
-  echo "TVOS_PROVISIONING_PROFILE_BASE64 is required to build tvOS." >&2
+# Every Release configuration signs manually, so all the App Store profiles
+# have to be on disk before xcodebuild runs. Fetched from App Store Connect
+# rather than carried as secrets, so a renewed profile needs no rotation here.
+export ASC_PRIVATE_KEY_PATH="${ASC_KEY_PATH}"
+if ! python3 Scripts/fetch-profiles.py; then
+  echo "Could not install provisioning profiles." >&2
   exit 1
 fi
 
