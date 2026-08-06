@@ -83,6 +83,8 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--group", default=os.environ.get("BETA_GROUP", "External Testers"))
     parser.add_argument("--build-number", default=os.environ.get("BUILD_NUMBER"))
+    parser.add_argument("--expect", default=os.environ.get("EXPECT_PLATFORMS", ""),
+                        help="comma-separated platforms that were uploaded, e.g. IOS,TV_OS")
     args = parser.parse_args()
 
     if not args.build_number:
@@ -94,10 +96,30 @@ def main() -> int:
         print(f"submit-beta: no beta group named {args.group!r}", file=sys.stderr)
         return 1
 
+    expected = {p.strip().upper() for p in args.expect.split(",") if p.strip()}
+
+    # App Store Connect ingests each upload asynchronously, so a build can be
+    # missing from the listing for a minute or two after altool returns. Listing
+    # once and submitting whatever happened to be there silently skipped the
+    # platform that had not landed yet.
+    deadline = time.time() + PROCESSING_TIMEOUT
     builds = builds_with_number(args.build_number)
+    while expected and time.time() < deadline:
+        missing = expected - {platform for platform, _ in builds}
+        if not missing:
+            break
+        print(f"  waiting for {', '.join(sorted(missing))} to appear in App Store Connect…")
+        time.sleep(POLL_SECONDS)
+        builds = builds_with_number(args.build_number)
+
     if not builds:
         print(f"submit-beta: no build {args.build_number} found — nothing to submit")
         return 0
+
+    still_missing = expected - {platform for platform, _ in builds}
+    for platform in sorted(still_missing):
+        print(f"  ! {platform}: never appeared as build {args.build_number} — "
+              f"not submitted. Add it by hand in App Store Connect.")
 
     notes = release_notes()
     print(f"▸ Submitting build {args.build_number} to {args.group!r}")

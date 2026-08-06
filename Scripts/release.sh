@@ -76,6 +76,7 @@ fi
 
 ARTIFACTS="$REPO_ROOT/Artifacts"
 mkdir -p "$ARTIFACTS"
+rm -f "$ARTIFACTS/uploaded-platforms.txt"
 
 echo "▸ Status Board release"
 echo "  build number : $BUILD_NUMBER"
@@ -174,6 +175,15 @@ ship() {                        # ship <scheme> <destination> <slug> <altool typ
   product="$(find "$ARTIFACTS/$slug" -maxdepth 1 -name "*.$ext" | head -1)"
   [[ -n "$product" ]] || { echo "No .$ext produced for $scheme" >&2; exit 1; }
   upload "$product" "$type"
+  # Record what really went up: the beta step must wait for exactly these and
+  # complain if one never appears, rather than quietly submitting a subset.
+  if [[ $DO_UPLOAD == 1 ]]; then
+    case "$type" in
+      ios) echo IOS ;;
+      appletvos) echo TV_OS ;;
+      macos) echo MAC_OS ;;
+    esac >> "$ARTIFACTS/uploaded-platforms.txt"
+  fi
 }
 
 # `both` is kept as a synonym for `all` so older invocations still work.

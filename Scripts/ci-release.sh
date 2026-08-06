@@ -150,6 +150,7 @@ echo "▸ Scripts/release.sh ${ARGS[*]}"
 
 # Put the new builds in front of testers, with the commit as release notes.
 if [[ "${DO_UPLOAD}" == "true" ]]; then
+  EXPECT_PLATFORMS="$(tr '\n' ',' < Artifacts/uploaded-platforms.txt 2>/dev/null || true)" \
   BUILD_NUMBER="${BUILD_NUMBER}" BETA_GROUP="${BETA_GROUP:-External Testers}" \
     python3 Scripts/submit-beta.py || echo "  (beta submission reported a problem; the uploads themselves succeeded)"
 fi
