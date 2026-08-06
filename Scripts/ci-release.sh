@@ -76,7 +76,6 @@ cleanup() {
   # Put the machine back exactly as it was found.
   if ((${#ORIGINAL_KEYCHAINS[@]})); then
     security list-keychains -d user -s "${ORIGINAL_KEYCHAINS[@]}"
-    security default-keychain -d user -s "${ORIGINAL_KEYCHAINS[0]}"
   fi
   security delete-keychain "${KEYCHAIN_PATH}" >/dev/null 2>&1
   rm -f "${ASC_KEY_PATH}"
@@ -106,14 +105,11 @@ security set-key-partition-list \
   -S apple-tool:,apple:,codesign: \
   -s -k "${KEYCHAIN_PASSWORD}" \
   "${KEYCHAIN_PATH}" >/dev/null
-# Deliberately the *only* keychain in the search list for the build. media's
-# login keychain also holds an "Apple Development" identity, and automatic
-# signing will happily choose it for an archive — then fail with
-# errSecInternalComponent, because that key cannot be unlocked in a headless
-# session. Hiding it leaves Apple Distribution as the only candidate.
-# The original list is put back by cleanup().
-security list-keychains -d user -s "${KEYCHAIN_PATH}"
-security default-keychain -d user -s "${KEYCHAIN_PATH}"
+# The ephemeral keychain goes first, but the original list has to stay: the
+# Apple WWDR intermediate lives in the login keychain, and without it the
+# imported certificate cannot build a chain — `find-identity -v` then reports
+# "0 valid identities found" even though the import succeeded.
+security list-keychains -d user -s "${KEYCHAIN_PATH}" "${ORIGINAL_KEYCHAINS[@]}"
 
 if ! security find-identity -v -p codesigning "${KEYCHAIN_PATH}" \
      | grep -Fq "\"${APP_STORE_DISTRIBUTION}\""; then
