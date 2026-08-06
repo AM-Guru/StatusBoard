@@ -1,0 +1,6 @@
+# GitHub Pages serves this folder. The engineering notes that also live in
+# docs/ are development documentation, not part of the published site.
+title: Status Board
+exclude:
+  - ci-setup.md
+  - k12-canvas-ols-api.md

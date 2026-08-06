@@ -1,0 +1,94 @@
+name: Build and Release
+
+# `media` (192.168.1.10) is on the LAN, so GitHub-hosted runners cannot reach
+# it over SSH. The build therefore runs on a **self-hosted runner installed on
+# media** — see docs/ci-setup.md for the one-time registration.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Which platforms to build and upload (the watch app ships inside the iOS build)
+        required: true
+        default: all
+        type: choice
+        options: [all, ios, macos, tvos]
+      upload:
+        description: Upload to TestFlight
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: [self-hosted, macOS, ARM64, media]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+      - name: Unit tests
+        working-directory: Packages/StatusBoardKit
+        run: swift test
+
+  build:
+    needs: test
+    runs-on: [self-hosted, macOS, ARM64, media]
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      DEVELOPMENT_TEAM: ${{ secrets.DEVELOPMENT_TEAM }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen if missing
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      # The API key is written to the location xcodebuild/altool look in, then
+      # removed in the always() cleanup step below.
+      - name: Stage App Store Connect key
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "${{ secrets.ASC_PRIVATE_KEY }}" > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: Derive build number
+        id: build_number
+        run: echo "value=$(date +%Y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and upload
+        env:
+          BUILD_NUMBER: ${{ steps.build_number.outputs.value }}
+          PLATFORMS: ${{ github.event.inputs.platforms || 'all' }}
+          DO_UPLOAD: ${{ github.event.inputs.upload || 'true' }}
+        run: |
+          set -euo pipefail
+          ARGS=(--build-number "$BUILD_NUMBER" --platforms "$PLATFORMS")
+          [ "$DO_UPLOAD" = "true" ] && ARGS+=(--upload)
+          ./Scripts/release.sh "${ARGS[@]}"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StatusBoard-${{ steps.build_number.outputs.value }}
+          path: |
+            Artifacts/*.ipa
+            Artifacts/*.pkg
+            Artifacts/**/*.xcarchive/Info.plist
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Remove staged key
+        if: always()
+        run: rm -f ~/.appstoreconnect/private_keys/AuthKey_*.p8

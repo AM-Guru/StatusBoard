@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0d11">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css?v=2">
+  <script src="script.js?v=2" defer></script>
+  <meta name="description" content="Status Board collects no data. No accounts, no analytics, no tracking, and no server behind it.">
+  <title>Privacy Policy — Status Board</title>
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <header class="site-header"><div class="site-header-inner">
+    <a class="wordmark" href="index.html" aria-label="Status Board home">
+      <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span> Status Board</a>
+    <nav aria-label="Primary navigation"><a href="index.html">← Back to the site</a></nav>
+  </div></header>
+  <main id="main"><section class="legal">
+    <span class="section-number">PRIVACY</span>
+    <h1 class="legal-title">Privacy Policy</h1>
+    <p class="meta">Status Board for macOS, iOS, iPadOS, tvOS and watchOS · Last updated 6 August 2026</p>
+    <p class="lede">Status Board collects nothing. There are no accounts, no sign-up, no analytics, no tracking, no advertising, and no third-party SDKs. The developer operates no server and has no way to see your data.</p>
+
+    <h2>What we collect</h2>
+    <p>Nothing. Status Board has no backend of any kind. No information about you, your devices, or your dashboards is ever transmitted to us, and we have no mechanism by which we could receive it.</p>
+
+    <h2>Where your data lives</h2>
+    <ul>
+      <li><strong>On your device.</strong> Dashboards, panel settings, cached panel values, board images and the widget cache are stored in the app's own container.</li>
+      <li><strong>In your private iCloud database.</strong> If you enable iCloud sync, dashboard <em>layouts and settings</em> are synchronised between your own devices using CloudKit's <strong>private database</strong>. That database belongs to your Apple Account; the developer has no access to it. Fetched values — including Health data — are never written to iCloud.</li>
+      <li><strong>In the system Keychain.</strong> Credentials, API tokens and session cookies for services you connect stay in the Keychain on your device and are never copied anywhere else.</li>
+    </ul>
+
+    <h2>Services you connect</h2>
+    <p>Status Board can show data from services <em>you</em> choose to configure — among them Canvas / Instructure, K12 OLS, GitHub, App Store Connect, Supabase, RSS feeds, web server logs, MCP servers and weather. When you configure one, your device talks to that service <strong>directly</strong>. Nothing is proxied through, relayed by, or copied to the developer. Your relationship with each of those services is governed by that service's own privacy policy, not this one.</p>
+
+    <h2>Health data</h2>
+    <p>Health panels read a small set of values (steps, active energy, exercise minutes, heart rate) from HealthKit, with your permission, in order to display them. The app requests <strong>read-only</strong> access, never writes to HealthKit, never syncs Health data to iCloud, and never transmits it off the device. You can revoke access at any time in the Health app.</p>
+
+    <h2>Web clips</h2>
+    <p>Web clip panels render pages you specify inside a sandboxed web view on your device. Content blocking based on the open EasyList and EasyPrivacy filter lists is enabled by default, which blocks common advertising and tracking requests. Cookies belong to the app's own web data store and are not shared with Safari or with us. If you save a site's sign-in details for automatic login, they go into the Keychain on your device.</p>
+
+    <h2>Local network</h2>
+    <p>The macOS app can act as a bridge that relays dashboard values to your other devices over your local network, discovered with Bonjour. That traffic stays on your network. It does not pass through the internet or through any server we operate.</p>
+
+    <h2>Children</h2>
+    <p>Status Board is not directed at children and collects no data from anyone, including children.</p>
+
+    <h2>Changes</h2>
+    <p>If this policy ever changes, the revised version will be posted at this address with a new date.</p>
+
+    <h2>Contact</h2>
+    <p>Questions about privacy: <a href="mailto:i@am.guru">i@am.guru</a></p>
+  </section></main>
+  <footer>
+    <div class="footer-wordmark">Status<span>·</span>Board</div>
+    <div class="footer-links">
+      <a href="index.html">Home</a><a href="terms.html">Terms of Service</a>
+      <a href="mailto:i@am.guru">i@am.guru</a>
+    </div>
+  </footer>
+</body>
+</html>

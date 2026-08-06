@@ -1,0 +1,327 @@
+name: StatusBoard
+options:
+  bundleIdPrefix: guru.am
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "18.0"
+    macOS: "15.0"
+    tvOS: "18.0"
+    watchOS: "11.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: 59A594LZGR
+
+packages:
+  StatusBoardKit:
+    path: Packages/StatusBoardKit
+
+targets:
+  StatusBoard-macOS:
+    type: application
+    platform: macOS
+    sources:
+      - Apps/macOS
+    dependencies:
+      - package: StatusBoardKit
+        product: StatusBoardKit
+      - target: Widgets-macOS
+    settings:
+      base:
+        PRODUCT_NAME: Status Board
+        PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard
+        ENABLE_HARDENED_RUNTIME: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    entitlements:
+      path: Apps/macOS/StatusBoard.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.network.server: true
+        com.apple.security.application-groups:
+          - group.guru.am.statusboard
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.guru.am.statusboard
+        com.apple.developer.icloud-services:
+          - CloudKit
+    info:
+      path: Apps/macOS/Info.plist
+      properties:
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        # Required for Mac App Store submission.
+        LSApplicationCategoryType: public.app-category.productivity
+        # Only HTTPS and the system Keychain, so encryption is exempt. Declaring
+        # it here keeps builds out of TestFlight's "Missing Compliance" state.
+        ITSAppUsesNonExemptEncryption: false
+        NSLocalNetworkUsageDescription: Status Board relays dashboard data between your devices on the local network.
+        NSCalendarsFullAccessUsageDescription: Status Board shows your upcoming events on calendar panels.
+        NSBonjourServices:
+          - _statusboard._tcp
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+
+  StatusBoard-iOS:
+    type: application
+    platform: iOS
+    sources:
+      - Apps/iOS
+    dependencies:
+      - package: StatusBoardKit
+        product: StatusBoardKit
+      - target: Widgets-iOS
+      - target: StatusBoard-watchOS
+        embed: true
+    settings:
+      base:
+        PRODUCT_NAME: Status Board
+        PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard
+        TARGETED_DEVICE_FAMILY: "1,2"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_UIStatusBarHidden: YES
+    entitlements:
+      path: Apps/iOS/StatusBoard.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.security.application-groups:
+          - group.guru.am.statusboard
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.guru.am.statusboard
+        com.apple.developer.icloud-services:
+          - CloudKit
+    info:
+      path: Apps/iOS/Info.plist
+      properties:
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        UILaunchScreen: {}
+        ITSAppUsesNonExemptEncryption: false
+        NSSupportsLiveActivities: true
+        NSHealthShareUsageDescription: Status Board shows your health metrics on dashboard panels you configure.
+        # Required whenever the HealthKit entitlement is present, even though
+        # Status Board only ever reads (HealthSource requests toShare: []).
+        NSHealthUpdateUsageDescription: Status Board only reads health data to display it. It never saves anything to Health.
+        # A universal app must declare all four, or the App Store rejects the
+        # bundle for not supporting iPad multitasking (error 90474).
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSLocalNetworkUsageDescription: Status Board connects to the bridge on your Mac to receive live dashboard data.
+        NSCalendarsFullAccessUsageDescription: Status Board shows your upcoming events on calendar panels.
+        NSBonjourServices:
+          - _statusboard._tcp
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+
+  StatusBoard-tvOS:
+    type: application
+    platform: tvOS
+    sources:
+      - Apps/tvOS
+    dependencies:
+      - package: StatusBoardKit
+        product: StatusBoardKit
+    settings:
+      base:
+        PRODUCT_NAME: Status Board
+        PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard
+        ASSETCATALOG_COMPILER_APPICON_NAME: "App Icon & Top Shelf Image"
+      configs:
+        # tvOS is the one platform where automatic signing insists on a
+        # *development* profile while archiving, and then fails because the
+        # team has no registered Apple TVs. iOS and macOS pick a distribution
+        # identity by themselves. So tvOS releases sign manually against an
+        # explicit App Store profile (created with POST /v1/profiles).
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: Apple Distribution
+          PROVISIONING_PROFILE_SPECIFIER: Status Board tvOS App Store
+    entitlements:
+      path: Apps/tvOS/StatusBoard.entitlements
+      properties:
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.guru.am.statusboard
+        com.apple.developer.icloud-services:
+          - CloudKit
+        # tvOS rejects any bundle that has icloud-services without this
+        # (error 90575) — CloudKit change notifications ride on push there.
+        aps-environment: production
+    info:
+      path: Apps/tvOS/Info.plist
+      properties:
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        NSLocalNetworkUsageDescription: Status Board connects to the bridge on your Mac to receive live dashboard data.
+        NSBonjourServices:
+          - _statusboard._tcp
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+
+  Widgets-iOS:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Apps/Widgets
+        excludes:
+          - "**/*.plist"
+          - "**/*.entitlements"
+    dependencies:
+      - package: StatusBoardKit
+        product: StatusBoardKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard.widgets
+        SKIP_INSTALL: YES
+    entitlements:
+      path: Apps/Widgets/Widgets-iOS.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.guru.am.statusboard
+    info:
+      path: Apps/Widgets/Info-iOS.plist
+      properties:
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleIdentifier: guru.am.StatusBoard.widgets
+        CFBundleDisplayName: Status Board Widgets
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  Widgets-macOS:
+    type: app-extension
+    platform: macOS
+    sources:
+      - path: Apps/Widgets
+        excludes:
+          - "**/*.plist"
+          - "**/*.entitlements"
+    dependencies:
+      - package: StatusBoardKit
+        product: StatusBoardKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard.widgets
+        SKIP_INSTALL: YES
+        ENABLE_HARDENED_RUNTIME: YES
+    entitlements:
+      path: Apps/Widgets/Widgets-macOS.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.application-groups:
+          - group.guru.am.statusboard
+    info:
+      path: Apps/Widgets/Info-macOS.plist
+      properties:
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleIdentifier: guru.am.StatusBoard.widgets
+        CFBundleDisplayName: Status Board Widgets
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  StatusBoard-watchOS:
+    type: application
+    platform: watchOS
+    sources:
+      - Apps/watchOS
+    dependencies:
+      - package: StatusBoardKit
+        product: StatusBoardKit
+      - target: Widgets-watchOS
+    settings:
+      base:
+        PRODUCT_NAME: Status Board
+        # A companion watch app's identifier must be prefixed by the iOS app's,
+        # which is what lets it ship inside the same App Store listing.
+        PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard.watchkitapp
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    entitlements:
+      path: Apps/watchOS/StatusBoard.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.security.application-groups:
+          - group.guru.am.statusboard
+        com.apple.developer.icloud-container-identifiers:
+          - iCloud.guru.am.statusboard
+        com.apple.developer.icloud-services:
+          - CloudKit
+    info:
+      path: Apps/watchOS/Info.plist
+      properties:
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        WKApplication: true
+        # Companion, not watch-only: the watch app is embedded in the iOS build
+        # so one App Store record and one TestFlight listing cover both.
+        WKCompanionAppBundleIdentifier: guru.am.StatusBoard
+        NSHealthShareUsageDescription: Status Board shows your health metrics on dashboard panels you configure.
+        # Required whenever the HealthKit entitlement is present, even though
+        # Status Board only ever reads (HealthSource requests toShare: []).
+        NSHealthUpdateUsageDescription: Status Board only reads health data to display it. It never saves anything to Health.
+        NSLocalNetworkUsageDescription: Status Board connects to the bridge on your Mac to receive live dashboard data.
+        NSBonjourServices:
+          - _statusboard._tcp
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+
+  Widgets-watchOS:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: Apps/Widgets
+        excludes:
+          - "**/*.plist"
+          - "**/*.entitlements"
+    dependencies:
+      - package: StatusBoardKit
+        product: StatusBoardKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: guru.am.StatusBoard.watchkitapp.widgets
+        SKIP_INSTALL: YES
+    entitlements:
+      path: Apps/Widgets/Widgets-watchOS.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.guru.am.statusboard
+    info:
+      path: Apps/Widgets/Info-watchOS.plist
+      properties:
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleIdentifier: guru.am.StatusBoard.watchkitapp.widgets
+        CFBundleDisplayName: Status Board Widgets
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+schemes:
+  StatusBoard-macOS:
+    build:
+      targets:
+        StatusBoard-macOS: all
+    run:
+      config: Debug
+  StatusBoard-iOS:
+    build:
+      targets:
+        StatusBoard-iOS: all
+    run:
+      config: Debug
+  StatusBoard-tvOS:
+    build:
+      targets:
+        StatusBoard-tvOS: all
+    run:
+      config: Debug
+  StatusBoard-watchOS:
+    build:
+      targets:
+        StatusBoard-watchOS: all
+    run:
+      config: Debug

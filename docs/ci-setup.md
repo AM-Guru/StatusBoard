@@ -1,0 +1,194 @@
+# Build and release setup
+
+Status Board builds on **media** (`192.168.1.10`, Apple silicon, Xcode 26.6)
+and uploads to TestFlight with an App Store Connect API key.
+
+`media` is a LAN address, so GitHub-hosted runners cannot SSH to it. The
+workflow therefore runs on a **self-hosted runner installed on media** — that
+is the supported way to build on a machine GitHub can't reach.
+
+## One-time: register the self-hosted runner on media
+
+On GitHub: **Settings → Actions → Runners → New self-hosted runner → macOS/ARM64**,
+then run the commands it gives you on media:
+
+```bash
+ssh media
+mkdir -p ~/actions-runner && cd ~/actions-runner
+# paste the download + config commands from the GitHub runner page, then:
+./config.sh --url https://github.com/AM-Guru/StatusBoard --token <TOKEN> \
+            --labels self-hosted,macOS,ARM64,media --unattended
+./svc.sh install && ./svc.sh start      # runs at login, survives reboots
+```
+
+The workflow targets `runs-on: [self-hosted, macOS, ARM64, media]`, so the
+`media` label matters.
+
+Also install XcodeGen once (the workflow installs it if missing):
+
+```bash
+ssh media 'brew install xcodegen'
+```
+
+## One-time: repository secrets
+
+**Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `ASC_KEY_ID` | Key ID from `~/Repo/appstoreconnect/.env` |
+| `ASC_ISSUER_ID` | Issuer ID from the same file |
+| `ASC_PRIVATE_KEY` | Full contents of `AuthKey_<KEY_ID>.p8`, including the BEGIN/END lines |
+| `DEVELOPMENT_TEAM` | Your 10-character Apple team id |
+
+The workflow writes the key to `~/.appstoreconnect/private_keys/` for the build
+and deletes it again in an `always()` step, so it never lingers on the runner.
+
+## Running a release
+
+Tag-triggered:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+Or **Actions → Build and Release → Run workflow**, choosing platforms
+(`both` / `ios` / `macos`) and whether to upload.
+
+## Running a release by hand
+
+The same script CI uses, straight from your Mac or over SSH:
+
+```bash
+./Scripts/release.sh --platforms both --upload
+```
+
+```bash
+ssh media 'cd ~/Repo/StatusBoard && ./Scripts/release.sh --upload'
+```
+
+It reads credentials from the environment, falling back to
+`~/Repo/appstoreconnect/.env`, so a local run usually needs no arguments.
+Add nothing and it archives without uploading — useful for a smoke test.
+
+## App Store Connect
+
+| | |
+| --- | --- |
+| App record | `6798804445` |
+| Bundle ID | `guru.am.StatusBoard` (iOS **and** macOS in one record) |
+| Widgets | `guru.am.StatusBoard.widgets` |
+| SKU | `guru.am.StatusBoard` |
+
+iOS and macOS deliberately share one bundle ID so a single app record — and a
+single TestFlight listing — covers both platforms. tvOS
+(`guru.am.statusboard.tv`) and watchOS (`guru.am.statusboard.watch`) keep their
+own identifiers and are not part of this pipeline yet; a watch-only app needs
+its own App Store Connect record.
+
+## One listing, every platform
+
+All five platforms ship from a single App Store Connect record by sharing one
+bundle identifier:
+
+| Target | Bundle ID | How it ships |
+| --- | --- | --- |
+| macOS | `guru.am.StatusBoard` | its own `.pkg` |
+| iOS / iPadOS | `guru.am.StatusBoard` | its own `.ipa` |
+| tvOS | `guru.am.StatusBoard` | its own `.ipa` |
+| watchOS | `guru.am.StatusBoard.watchkitapp` | **embedded inside the iOS `.ipa`** |
+| Widgets | `guru.am.StatusBoard.widgets` / `…​.watchkitapp.widgets` | inside their host |
+
+The watch app is a **companion**, not watch-only: its identifier is prefixed by
+the iPhone app's, its `Info.plist` carries `WKCompanionAppBundleIdentifier`
+(and no `WKWatchOnly`), and XcodeGen's `embed: true` on the iOS target produces
+the *Embed Watch Content* phase. That is what allows one TestFlight listing to
+cover the watch — a watch-only app would need its own record.
+
+`Scripts/release.sh --platforms all` therefore builds three archives, not five.
+
+## Signing gotchas found on the first real run
+
+**Bundle ID capabilities must be enabled in the portal before archiving.**
+Automatic signing will not invent them. `guru.am.StatusBoard` needs
+`APP_GROUPS`, `ICLOUD` and `HEALTHKIT`; `guru.am.StatusBoard.widgets` needs
+`APP_GROUPS`. Without them the build fails with a wall of *"Provisioning
+profile 'iOS Team Provisioning Profile: \*' doesn't include the … capability"*.
+They are already set; if a new identifier is added, `POST /v1/bundleIdCapabilities`
+with the App Store Connect API is the quickest way to turn them on.
+
+**Pass the API key by id, not by path.** `-authenticationKeyPath` makes
+xcodebuild fail with *"Authentication failed: Make sure a bearer token was
+provided"*. The key has to sit in `~/.appstoreconnect/private_keys/AuthKey_<ID>.p8`
+and be referenced with `-authenticationKeyID` / `-authenticationKeyIssuerID`
+only. `Scripts/release.sh` copies it there itself.
+
+**The `.env` is parsed, not sourced.** One of its values contains an unquoted
+space, which `source` tries to execute.
+
+**`Info.plist` versions must reference build settings, not literals.** XcodeGen
+resolves `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` at *generation* time
+and would bake `1` into every plist, so `--build-number` never reached the
+bundle and the second upload was rejected with *"The bundle version must be
+higher than the previously uploaded version: '1'"*. Each `info:` block now sets
+`CFBundleVersion: $(CURRENT_PROJECT_VERSION)` and
+`CFBundleShortVersionString: $(MARKETING_VERSION)` so Xcode expands them at
+build time.
+
+**tvOS signs manually; the other platforms do not.** Automatic signing insists
+on a *development* profile when archiving tvOS and then fails with *"Your team
+has no devices from which to generate a provisioning profile"* — iOS and macOS
+substitute a distribution identity by themselves. Forcing
+`CODE_SIGN_IDENTITY = Apple Distribution` while still on automatic signing just
+trades that for a *conflicting provisioning settings* error. The working
+arrangement is an explicit App Store profile:
+
+```bash
+# already created; recreate the same way if it ever expires (2027-07-19)
+# POST /v1/profiles  {profileType: TVOS_APP_STORE, bundleId: 2M4MBA8JU3,
+#                     certificates: [NWADCF67GA], name: "Status Board tvOS App Store"}
+```
+
+The profile is installed into `~/Library/Developer/Xcode/UserData/Provisioning Profiles/`,
+the tvOS target's **Release** config uses `CODE_SIGN_STYLE: Manual` with that
+`PROVISIONING_PROFILE_SPECIFIER`, and `release.sh` writes a matching
+`signingStyle: manual` export plist for tvOS only. **A new CI machine needs
+that profile installed**, since manual signing will not fetch it.
+
+## Some bundle keys are upload-blocking
+
+Learned the hard way, one rejected upload at a time:
+
+| Key | Where | Why |
+| --- | --- | --- |
+| `UISupportedInterfaceOrientations` with all **four** orientations | iOS | error 90474 — a universal app must support iPad multitasking |
+| `NSHealthUpdateUsageDescription` | iOS, watchOS | error 90683 — required whenever the HealthKit entitlement is present, even though the app only ever reads |
+| `LSApplicationCategoryType` | macOS | required for Mac App Store bundles |
+| `ITSAppUsesNonExemptEncryption: false` | iOS, macOS | otherwise builds park in "Missing Compliance" and cannot reach testers |
+| tvOS Brand Assets | tvOS | Apple TV needs layered `.imagestack` icons plus top-shelf art; the back layer and top shelf must be **fully opaque** |
+
+## Before the first upload
+
+1. `DEVELOPMENT_TEAM` is read from `project.yml` when it is not in the
+   environment, so a local run needs no extra setup.
+2. Age rating and privacy policy URL are set (see below). Internal TestFlight
+   testing works as soon as a build finishes processing.
+3. `CFBundleShortVersionString` comes from `MARKETING_VERSION` in
+   `project.yml`; the build number is generated as `YYYYMMDDHHMM` per run.
+
+## Store metadata already configured
+
+| | |
+| --- | --- |
+| Category | Productivity / Utilities |
+| Age rating | Answered honestly; `unrestrictedWebAccess = true` because Web Clip panels load any URL the user enters |
+| App Privacy | **Data Not Collected**, published |
+| Privacy policy | `https://am-guru.github.io/StatusBoard/privacy.html` |
+| Support | `https://github.com/AM-Guru/StatusBoard/issues` |
+| Marketing | `https://am-guru.github.io/StatusBoard/` |
+| Beta review contact | Kalani Helekunihi, i@am.guru — no demo account required |
+
+The two URLs above are served by **GitHub Pages from the `docs/` folder** on
+`main`. They only resolve once the repository is pushed and Pages is enabled
+(Settings → Pages → Source: Deploy from a branch → `main` / `/docs`). Internal
+TestFlight does not check them; App Review does.
