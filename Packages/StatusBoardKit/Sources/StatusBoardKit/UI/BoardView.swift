@@ -145,9 +145,9 @@ public struct BoardView: View {
                     y: origin.y + (isDragging ? dragOffset.height : 0))
             .zIndex(isDragging || isResizing ? 10 : 0)
             .animation(.snappy(duration: 0.2), value: panel.frame)
-            #if os(tvOS)
-            .focusable()
-            #endif
+            // Deliberately not focusable on tvOS: panels are read-only there, and
+            // a focusable panel would swallow the remote's swipe-down before
+            // TVRootView could open the menu.
     }
 
     #if !os(tvOS) && !os(watchOS)

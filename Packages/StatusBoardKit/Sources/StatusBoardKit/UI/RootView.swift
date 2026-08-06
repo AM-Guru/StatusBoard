@@ -257,32 +257,77 @@ struct BridgeStatusLabel: View {
 // MARK: - tvOS
 
 #if os(tvOS)
+/// Apple TV is a display first: the board fills the screen edge to edge with no
+/// permanent chrome. Swiping down on the remote brings up the board switcher and
+/// settings; the Menu button dismisses them again.
 struct TVRootView: View {
     @Bindable var model: AppModel
     /// 0 = off; otherwise seconds between automatic board switches.
     @AppStorage("sb.autoCycleSeconds") private var autoCycleSeconds = 0
+    @State private var showsMenu = false
+    @State private var showsHint = true
+    @FocusState private var boardHasFocus: Bool
+
+    private var selectedID: Dashboard.ID? {
+        model.store.selectedDashboardID ?? model.store.dashboards.first?.id
+    }
 
     var body: some View {
-        TabView(selection: Binding(
-            get: { model.store.selectedDashboardID ?? model.store.dashboards.first?.id },
-            set: { model.store.selectedDashboardID = $0 })) {
-            ForEach(model.store.dashboards) { board in
-                BoardView(model: model, dashboardID: board.id)
-                    .tabItem { Text(board.name) }
-                    .tag(Optional(board.id))
+        // A plain Button is what reliably takes focus on tvOS, and a focused
+        // view is what receives move commands at all. It also means the menu
+        // can still be reached by clicking the touchpad, so the settings can
+        // never become unreachable if a swipe is missed.
+        Button {
+            showsMenu = true
+        } label: {
+            ZStack {
+                SBTheme.background
+                if let id = selectedID {
+                    BoardView(model: model, dashboardID: id)
+                } else {
+                    BoardView(model: model, dashboardID: UUID())
+                }
             }
-            tvSettings
-                .tabItem { Image(systemName: "gearshape") }
-                .tag(Optional<Dashboard.ID>.none)
         }
-        .ignoresSafeArea(edges: .bottom)
+        .buttonStyle(.plain)
+        // Fill the panel, overscan margins included — a TV hung on a wall wants
+        // the whole screen, not a letterboxed card.
+        .ignoresSafeArea()
+        .focused($boardHasFocus)
+        .onMoveCommand { direction in
+            if direction == .down { showsMenu = true }
+        }
+        .onAppear {
+            boardHasFocus = true
+            Task {
+                try? await Task.sleep(for: .seconds(4))
+                withAnimation { showsHint = false }
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showsHint && !showsMenu {
+                Label("Swipe down or click for boards and settings", systemImage: "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(SBTheme.textSecondary)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 28)
+                    .transition(.opacity)
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             if case .connected(let name) = model.bridgeClient.connectionState {
                 Label(name, systemImage: "antenna.radiowaves.left.and.right")
                     .font(.caption2)
                     .foregroundStyle(SBTheme.textSecondary)
-                    .padding(8)
+                    .padding(20)
             }
+        }
+        .sheet(isPresented: $showsMenu) {
+            TVMenuView(model: model,
+                       autoCycleSeconds: $autoCycleSeconds,
+                       isPresented: $showsMenu)
         }
         .task(id: autoCycleSeconds) {
             guard autoCycleSeconds > 0 else { return }
@@ -305,10 +350,32 @@ struct TVRootView: View {
         model.store.selectedDashboardID = boards[(index + 1) % boards.count].id
     }
 
-    private var tvSettings: some View {
-        VStack(spacing: 24) {
-            Text("Settings")
-                .font(.title2.bold())
+}
+
+/// Board switcher and settings, reached by swiping down. Dismissed with Menu.
+struct TVMenuView: View {
+    @Bindable var model: AppModel
+    @Binding var autoCycleSeconds: Int
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(spacing: 32) {
+            if model.store.dashboards.count > 1 {
+                VStack(spacing: 12) {
+                    Text("BOARDS")
+                        .font(SBTheme.titleFont(size: 14))
+                        .foregroundStyle(SBTheme.textSecondary)
+                    HStack(spacing: 16) {
+                        ForEach(model.store.dashboards) { board in
+                            Button(board.name) {
+                                model.store.selectedDashboardID = board.id
+                                isPresented = false
+                            }
+                        }
+                    }
+                }
+            }
+
             Picker("Cycle dashboards", selection: $autoCycleSeconds) {
                 Text("Off").tag(0)
                 Text("Every 30 seconds").tag(30)
@@ -317,9 +384,12 @@ struct TVRootView: View {
             }
             .pickerStyle(.inline)
             .frame(maxWidth: 700)
+
             Text("Dashboards and their data sync from your other devices via iCloud, and live data arrives from the Mac bridge.")
                 .font(.callout)
                 .foregroundStyle(SBTheme.textSecondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 800)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(SBTheme.background.ignoresSafeArea())
