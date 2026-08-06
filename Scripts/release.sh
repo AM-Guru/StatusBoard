@@ -126,6 +126,10 @@ IOS_PROFILES='  <dict>
   </dict>'
 TVOS_PROFILES='  <dict>
     <key>guru.am.StatusBoard</key><string>Status Board tvOS App Store</string>
+  </dict>'
+MACOS_PROFILES='  <dict>
+    <key>guru.am.StatusBoard</key><string>Status Board macOS App Store</string>
+    <key>guru.am.StatusBoard.widgets</key><string>Status Board macOS Widgets App Store</string>
   </dict>' 
 
 make_export_plist() {           # make_export_plist <path> <method> <destination> [profiles-dict]
@@ -178,7 +182,26 @@ if [[ "$PLATFORMS" == "both" ]]; then
 fi
 
 wants ios   && ship "StatusBoard-iOS"   "generic/platform=iOS"   ios   ios   ipa "$IOS_PROFILES"
-wants macos && ship "StatusBoard-macOS" "generic/platform=macOS" macos macos pkg
+# A Mac App Store .pkg is signed by a "Mac Installer Distribution"
+# certificate, which is a different certificate from the one that signs the
+# app. Without it exportArchive fails after a full archive, so check first and
+# say plainly why macOS was left out rather than failing the whole release.
+if wants macos; then
+  if security find-identity -p basic -v 2>/dev/null | grep -q "Mac Installer Distribution"; then
+    ship "StatusBoard-macOS" "generic/platform=macOS" macos macos pkg "$MACOS_PROFILES"
+  else
+    echo "▸ SKIPPING macOS"
+    echo "  No 'Mac Installer Distribution' certificate for team $DEVELOPMENT_TEAM."
+    echo "  The app signs fine; the installer package cannot be signed without it."
+    echo "  Create one at https://developer.apple.com/account/resources/certificates"
+    echo "  (Mac Installer Distribution), then add it to the CI keychain."
+    SKIPPED_MACOS=1
+  fi
+fi
 wants tvos  && ship "StatusBoard-tvOS"  "generic/platform=tvOS"  tvos  appletvos ipa "$TVOS_PROFILES"
 
-echo "✓ Done. Artifacts in $ARTIFACTS"
+if [[ "${SKIPPED_MACOS:-0}" == 1 ]]; then
+  echo "✓ Done (macOS skipped — see above). Artifacts in $ARTIFACTS"
+else
+  echo "✓ Done. Artifacts in $ARTIFACTS"
+fi

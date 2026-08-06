@@ -53,6 +53,46 @@ never need signing credentials. The upload decision is made in shell rather than
 a GitHub expression, because the *string* `"false"` is truthy in those — the
 earlier version would have uploaded even with the checkbox cleared.
 
+## Signing: all Release configurations are manual
+
+Every target's **Release** configuration pins `CODE_SIGN_STYLE: Manual` with an
+explicit App Store profile. This is not a preference — automatic signing on
+media resolves `iOS Team Provisioning Profile: …`, a *development* profile, and
+then signs with the Apple Development identity whose key cannot be unlocked in
+a headless session (`errSecInternalComponent`). That failed every release until
+it was pinned.
+
+| Target | Profile |
+| --- | --- |
+| StatusBoard-iOS | Status Board iOS App Store |
+| Widgets-iOS | Status Board iOS Widgets App Store |
+| StatusBoard-watchOS | Status Board Watch App Store |
+| Widgets-watchOS | Status Board Watch Widgets App Store |
+| StatusBoard-tvOS | Status Board tvOS App Store |
+| StatusBoard-macOS | Status Board macOS App Store |
+| Widgets-macOS | Status Board macOS Widgets App Store |
+
+`Scripts/fetch-profiles.py` downloads every `Status Board *` profile from App
+Store Connect at build time with the API key already on the runner, so profiles
+are not secrets and a renewal needs no rotation. It signs its own ES256 JWT with
+`openssl` because the build machine has no third-party Python.
+
+## macOS needs one more certificate
+
+macOS **archives** correctly, but a Mac App Store `.pkg` is signed by a
+**Mac Installer Distribution** certificate — a different certificate from the
+`Apple Distribution` one that signs the app, and the team does not have it:
+
+```
+error: exportArchive No signing certificate "Mac Installer Distribution" found
+```
+
+`release.sh` checks for it and skips macOS with an explanation rather than
+failing the whole release, so iOS and tvOS still ship. To enable macOS: create a
+**Mac Installer Distribution** certificate at
+<https://developer.apple.com/account/resources/certificates>, then make it
+available to the CI keychain the same way the distribution `.p12` is.
+
 ## Still required before CI can cut a release
 
 1. **A distribution signing identity on media.** It currently has only
