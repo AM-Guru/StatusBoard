@@ -624,6 +624,83 @@ import Testing
     }
 }
 
+@MainActor
+@Suite struct BoardCopyTests {
+    private func makeStore() -> DashboardStore {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sb-board-copy-\(UUID().uuidString).json")
+        return DashboardStore(fileURL: url)
+    }
+
+    @Test func duplicateCopiesPanelsWithFreshIdentities() throws {
+        let store = makeStore()
+        let original = store.dashboards[0]
+
+        let copy = try #require(store.duplicate(id: original.id))
+        #expect(copy.id != original.id)
+        #expect(copy.name == "\(original.name) Copy")
+        #expect(copy.panels.count == original.panels.count)
+        #expect(copy.panels.map(\.title) == original.panels.map(\.title))
+        #expect(copy.panels.map(\.settings) == original.panels.map(\.settings))
+        #expect(Set(copy.panels.map(\.id)).isDisjoint(with: Set(original.panels.map(\.id))))
+        // The original is left exactly as it was.
+        #expect(store.dashboard(id: original.id) == original)
+    }
+
+    @Test func duplicateLandsAfterTheOriginalAndIsSelected() throws {
+        let store = makeStore()
+        store.add(Dashboard(name: "Second"))
+        let original = store.dashboards[0]
+
+        let copy = try #require(store.duplicate(id: original.id))
+        #expect(store.dashboards.map(\.id) == [original.id, copy.id, store.dashboards[2].id])
+        #expect(store.selectedDashboardID == copy.id)
+    }
+
+    @Test func duplicateRemapsDeviceLayouts() throws {
+        let store = makeStore()
+        let original = store.dashboards[0]
+        let panelID = original.panels[0].id
+        let hiddenID = original.panels[1].id
+        let frame = GridRect(x: 1, y: 2, width: 2, height: 1)
+        store.setPanelFrame(frame, panelID: panelID, in: original.id, on: .tv)
+        store.setPanelHidden(true, panelID: hiddenID, in: original.id, on: .tv)
+
+        let copy = try #require(store.duplicate(id: store.dashboards[0].id))
+        let layout = try #require(copy.layout(for: .tv))
+        let movedCopy = try #require(copy.panels.first { $0.title == original.panels[0].title })
+        let hiddenCopy = try #require(copy.panels.first { $0.title == original.panels[1].title })
+        #expect(layout.frames[movedCopy.id.uuidString] == frame)
+        #expect(layout.hiddenPanelIDs.contains(hiddenCopy.id.uuidString))
+        // Nothing keyed by an ID that no longer exists on this board.
+        let copiedIDs = Set(copy.panels.map(\.id.uuidString))
+        #expect(Set(layout.frames.keys).isSubset(of: copiedIDs))
+        #expect(layout.hiddenPanelIDs.isSubset(of: copiedIDs))
+    }
+
+    @Test func repeatedDuplicatesGetDistinctNames() throws {
+        let store = makeStore()
+        let original = store.dashboards[0]
+        store.duplicate(id: original.id)
+        store.duplicate(id: original.id)
+        store.duplicate(id: original.id)
+        #expect(store.dashboards.map(\.name) == [original.name,
+                                                 "\(original.name) Copy 3",
+                                                 "\(original.name) Copy 2",
+                                                 "\(original.name) Copy"])
+    }
+
+    @Test func duplicateIsUndoable() throws {
+        let store = makeStore()
+        let before = store.dashboards.count
+        let copy = try #require(store.duplicate(id: store.dashboards[0].id))
+        #expect(store.dashboards.count == before + 1)
+        store.undo()
+        #expect(store.dashboards.count == before)
+        #expect(store.dashboard(id: copy.id) == nil)
+    }
+}
+
 @Suite struct SpotlightIdentifierTests {
     @Test func parsesBoardAndPanelIdentifiers() {
         let boardID = UUID()
@@ -950,6 +1027,74 @@ import Testing
     }
 }
 
+@Suite("K12 class schedule")
+struct K12ScheduleSnapshotTests {
+    private func event(_ course: String, minutesFromNow: Double, teacher: String = "",
+                       attendance: String = "", url: String? = nil) -> K12OLSSource.ClassEvent {
+        let start = Date().addingTimeInterval(minutesFromNow * 60)
+        return K12OLSSource.ClassEvent(
+            title: course, courseName: course, teacher: teacher,
+            start: start, end: start.addingTimeInterval(50 * 60),
+            timeText: "1:30 PM", localDay: "", attendance: attendance,
+            platform: "", url: url)
+    }
+
+    @Test func todaysClassesRenderAsScheduleRowsRatherThanATable() {
+        guard case .schedule(let classes) = K12OLSSource.todaySnapshot([
+            event("Math 8", minutesFromNow: 120),
+            event("Music 3", minutesFromNow: 30)
+        ]) else {
+            Issue.record("expected a schedule snapshot")
+            return
+        }
+        // Sorted by start, so the panel counts down to the right class.
+        #expect(classes.map(\.course) == ["Music 3", "Math 8"])
+    }
+
+    @Test func aDayOffIsAnEmptyScheduleNotAnError() {
+        guard case .schedule(let classes) = K12OLSSource.todaySnapshot([]) else {
+            Issue.record("expected a schedule snapshot")
+            return
+        }
+        #expect(classes.isEmpty)
+    }
+
+    @Test func hiddenMeetingsStayOutOfTheList() {
+        let classes = K12OLSSource.scheduledClasses([
+            event("Math 8", minutesFromNow: 30),
+            event("Homeroom", minutesFromNow: 60, attendance: "do-not-display")
+        ])
+        #expect(classes.map(\.course) == ["Math 8"])
+    }
+
+    @Test func theSameMeetingReportedTwiceCollapsesIntoOneRow() {
+        let start = Date().addingTimeInterval(30 * 60)
+        func copy(teacher: String, attendance: String, url: String?) -> K12OLSSource.ClassEvent {
+            K12OLSSource.ClassEvent(
+                title: "Math 8", courseName: "Math 8", teacher: teacher,
+                start: start, end: start.addingTimeInterval(50 * 60),
+                timeText: "1:30 PM", localDay: "", attendance: attendance,
+                platform: "", url: url)
+        }
+        let classes = K12OLSSource.scheduledClasses([
+            copy(teacher: "", attendance: "optional", url: nil),
+            copy(teacher: "Mallory Smith", attendance: "required",
+                 url: "https://learn2.k12.com/class")
+        ])
+        #expect(classes.count == 1)
+        // The duplicate contributes whatever the first copy was missing.
+        #expect(classes[0].attendanceRequired)
+        #expect(classes[0].teacher == "Mallory Smith")
+        #expect(classes[0].url == "https://learn2.k12.com/class")
+    }
+
+    @Test func rowsKeepTheirIdentityAcrossRefreshes() {
+        let events = [event("Math 8", minutesFromNow: 30)]
+        #expect(K12OLSSource.scheduledClasses(events).map(\.id)
+                == K12OLSSource.scheduledClasses(events).map(\.id))
+    }
+}
+
 @Suite struct SchoolPresentationTests {
     @Test func lettersDeriveFromScoreWhenAbsent() {
         #expect(CourseGrade(course: "A", score: 95).displayLetter == "A")
@@ -999,6 +1144,66 @@ import Testing
         let legacy = try JSONDecoder().decode(PanelSettings.self, from: Data("{}".utf8))
         #expect(legacy.hiddenCourses.isEmpty)
         #expect(legacy.visibleGrades(grades).count == 3)
+    }
+
+    /// Builds one Canvas submission the way the API returns it.
+    private func submission(points: Double, state: String, score: Double? = nil,
+                            missing: Bool = false, submittedAt: String? = nil,
+                            excused: Bool = false, omitted: Bool = false) -> JSONValue {
+        var fields: [String: JSONValue] = [
+            "workflow_state": .string(state),
+            "missing": .bool(missing),
+            "excused": .bool(excused),
+            "assignment": .object(["points_possible": .number(points),
+                                   "omit_from_final_grade": .bool(omitted)])
+        ]
+        fields["score"] = score.map { JSONValue.number($0) } ?? .null
+        fields["submitted_at"] = submittedAt.map { JSONValue.string($0) } ?? .null
+        return .object(fields)
+    }
+
+    @Test func ungradedWorkIsCountedRatherThanScored() {
+        let tally = GradesSource.tally([
+            submission(points: 10, state: "graded", score: 9, submittedAt: "2026-08-05T00:00:00Z"),
+            // Handed in, waiting on the teacher.
+            submission(points: 10, state: "submitted", submittedAt: "2026-08-06T00:00:00Z"),
+            // The zero a missing-work policy fills in before anyone marks it.
+            submission(points: 10, state: "graded", score: 0, missing: true),
+            // Not due yet.
+            submission(points: 10, state: "unsubmitted")
+        ])
+        #expect(tally.ungraded == 2)
+        // 9/10 — the placeholder zero would otherwise drag this to 45%.
+        #expect(tally.score == 90)
+    }
+
+    @Test func aRealZeroStillCounts() {
+        // Turned in and marked zero is a grade, not a placeholder.
+        let tally = GradesSource.tally([
+            submission(points: 10, state: "graded", score: 10, submittedAt: "2026-08-05T00:00:00Z"),
+            submission(points: 10, state: "graded", score: 0, missing: true,
+                       submittedAt: "2026-08-05T00:00:00Z")
+        ])
+        #expect(tally.ungraded == 0)
+        #expect(tally.score == 50)
+    }
+
+    @Test func workThatCannotCountIsIgnoredEntirely() {
+        let tally = GradesSource.tally([
+            submission(points: 10, state: "graded", score: 0, excused: true),
+            submission(points: 10, state: "graded", score: 0, omitted: true),
+            submission(points: 0, state: "graded", score: 0)
+        ])
+        #expect(tally == GradesSource.Tally())
+        // Nothing marked yet reads as "no score", not as a zero.
+        #expect(tally.score == nil)
+    }
+
+    @Test func aGradeSavedBeforePendingCountsStillLoads() throws {
+        let legacy = Data(#"{"id":"1","course":"Geography","score":92}"#.utf8)
+        let grade = try JSONDecoder().decode(CourseGrade.self, from: legacy)
+        #expect(grade.ungradedCount == 0)
+        #expect(grade.score == 92)
     }
 
     @Test func scheduleKnowsLiveAndFinished() {
@@ -1408,6 +1613,98 @@ struct WatchLayoutTests {
 
         #expect(store.dashboards.count == 1)
         #expect(store.dashboards[0].panels.map(\.title) == ["Clock", "Grades"])
+    }
+
+    // MARK: - Boards over the Mac bridge
+
+    /// The whole point of bridge delivery: an Apple TV that iCloud never
+    /// reaches still gets its boards from the Mac on the same network.
+    @Test func boardsArriveFromTheBridgeWithoutICloud() throws {
+        let url = try tempURL()
+        let store = displayOnlyStore(at: url)
+        let board = Dashboard(name: "Operations")
+        store.applyBridgeBoards([board])
+
+        #expect(store.dashboards.map(\.name) == ["Operations"])
+        #expect(store.selectedDashboardID == board.id)
+    }
+
+    @Test func bridgeBoardsSurviveARelaunch() throws {
+        let url = try tempURL()
+        let store = displayOnlyStore(at: url)
+        let board = Dashboard(name: "Operations")
+        store.applyBridgeBoards([board])
+        store.saveNow()
+
+        let relaunched = displayOnlyStore(at: url)
+        #expect(relaunched.dashboards.map(\.id) == [board.id])
+    }
+
+    /// The Mac sends its whole set, so a board deleted there goes away here.
+    @Test func aBoardTheMacNoLongerHasIsDropped() throws {
+        let url = try tempURL()
+        let store = displayOnlyStore(at: url)
+        let kept = Dashboard(name: "Operations")
+        let removed = Dashboard(name: "Scratch")
+        store.applyBridgeBoards([kept, removed])
+        store.applyBridgeBoards([kept])
+
+        #expect(store.dashboards.map(\.name) == ["Operations"])
+    }
+
+    /// But the Mac's list is not the last word on boards it has never seen —
+    /// one made on an iPhone and delivered by iCloud must not vanish just
+    /// because a Mac on the network hasn't synced it yet.
+    @Test func aBridgeUpdateLeavesICloudBoardsAlone() throws {
+        let url = try tempURL()
+        let store = displayOnlyStore(at: url)
+        let fromPhone = Dashboard(name: "From iPhone")
+        store.applyRemote(fromPhone)
+        store.applyBridgeBoards([Dashboard(name: "From Mac")])
+
+        #expect(store.dashboards.map(\.name).sorted() == ["From Mac", "From iPhone"])
+    }
+
+    /// Last-writer-wins, same as iCloud: a stale copy from a Mac that has been
+    /// asleep must not undo an edit that already arrived.
+    @Test func anOlderBridgeCopyDoesNotOverwriteANewerBoard() throws {
+        let url = try tempURL()
+        let store = displayOnlyStore(at: url)
+        var board = Dashboard(name: "Operations")
+        board.modifiedAt = Date()
+        store.applyRemote(board)
+
+        var stale = board
+        stale.name = "Old Name"
+        stale.modifiedAt = board.modifiedAt.addingTimeInterval(-3600)
+        store.applyBridgeBoards([stale])
+
+        #expect(store.dashboards.map(\.name) == ["Operations"])
+    }
+
+    /// A Mac, iPad or iPhone authors its own boards. A bridge on the network
+    /// must never be able to replace them.
+    @Test func anAuthoringDeviceIgnoresBridgeBoards() throws {
+        let url = try tempURL()
+        let store = DashboardStore(fileURL: url, authorsBoards: true)
+        let before = store.dashboards.map(\.id)
+        store.applyBridgeBoards([Dashboard(name: "From Some Other Mac")])
+
+        #expect(store.dashboards.map(\.id) == before)
+    }
+
+    @Test func boardsRoundtripThroughTheWireProtocol() throws {
+        var board = Dashboard(name: "Operations")
+        board.panels = [Panel(kind: .clock, title: "Clock",
+                              frame: GridRect(x: 0, y: 0, width: 2, height: 1))]
+        let line = try #require(BridgeMessage.boards([board]).encodedLine())
+        let decoded = try #require(BridgeMessage.decodeLine(line.dropLast()))
+        guard case .boards(let boards) = decoded else {
+            Issue.record("wrong message type")
+            return
+        }
+        #expect(boards.map(\.id) == [board.id])
+        #expect(boards[0].panels.map(\.title) == ["Clock"])
     }
 }
 
@@ -2440,5 +2737,513 @@ struct SessionCookieJarTests {
         #expect(place?.name == "Ithaca")
         #expect(place?.detail == "New York, United States")
         #expect(place?.latitude == 42.44)
+    }
+}
+
+// MARK: - Home integrations
+
+@Suite struct HVACAnalyzerTests {
+    /// Builds a sample every `stepMinutes`, following a script of
+    /// (status, minutes) segments, with a temperature that drifts the way the
+    /// equipment would push it.
+    func samples(from start: Date, stepMinutes: Double,
+                 script: [(HVACStatus, Double)],
+                 startTemperature: Double = 21,
+                 driftPerMinute: Double = 0.02,
+                 target: Double? = 21,
+                 humidity: Double? = nil) -> [HVACSample] {
+        var result: [HVACSample] = []
+        var clock = start
+        var temperature = startTemperature
+        for (status, minutes) in script {
+            var elapsed = 0.0
+            while elapsed < minutes {
+                result.append(HVACSample(date: clock, indoorC: temperature, targetC: target,
+                                         humidity: humidity, status: status))
+                let direction: Double = status == .heating ? 1 : (status == .cooling ? -1 : -0.2)
+                temperature += direction * driftPerMinute * stepMinutes
+                clock = clock.addingTimeInterval(stepMinutes * 60)
+                elapsed += stepMinutes
+            }
+        }
+        return result
+    }
+
+    let epoch = Date(timeIntervalSince1970: 1_770_000_000)
+
+    @Test func runsSplitOnStatusChangesAndIgnoreTheOpenEndedOnes() {
+        let script: [(HVACStatus, Double)] = [(.off, 20), (.heating, 12), (.off, 20),
+                                              (.heating, 12), (.off, 20)]
+        let runs = HVACAnalyzer.runs(in: samples(from: epoch, stepMinutes: 1, script: script))
+        #expect(runs.count == 5)
+        // The first and last touch the edge of the window, so their lengths
+        // are floors and they must not be counted as cycles.
+        #expect(runs.first?.isComplete == false)
+        #expect(runs.last?.isComplete == false)
+        #expect(runs.filter { $0.status == .heating }.allSatisfy { $0.isComplete })
+    }
+
+    @Test func aFanRunningOnItsOwnIsNotACycle() {
+        // A fan left on "circulate" would otherwise read as one huge run and
+        // hide every real compressor cycle inside it.
+        let script: [(HVACStatus, Double)] = [(.fan, 30), (.cooling, 15), (.fan, 30)]
+        let runs = HVACAnalyzer.runs(in: samples(from: epoch, stepMinutes: 1, script: script))
+        #expect(runs.filter { $0.status.isConditioning }.count == 1)
+        #expect(runs.allSatisfy { $0.status != .fan })
+    }
+
+    @Test func healthyCyclingRaisesNothing() {
+        // Twelve-minute runs, twice an hour: textbook.
+        var script: [(HVACStatus, Double)] = []
+        for _ in 0..<6 { script += [(.off, 18), (.heating, 12)] }
+        let history = samples(from: epoch, stepMinutes: 1, script: script)
+        let result = HVACAnalyzer.analyze(samples: history, windowHours: 6,
+                                          now: history.last!.date)
+        #expect(result.hasEnoughHistory)
+        #expect(result.cycles >= 4)
+        #expect(!result.issues.contains { $0.id == "short-cycling" })
+    }
+
+    @Test func shortCyclingIsCaughtAndCarriesItsEvidence() {
+        // Four-minute runs, eight times an hour.
+        var script: [(HVACStatus, Double)] = []
+        for _ in 0..<24 { script += [(.off, 4), (.cooling, 4)] }
+        let history = samples(from: epoch, stepMinutes: 1, script: script)
+        let result = HVACAnalyzer.analyze(samples: history, windowHours: 6,
+                                          now: history.last!.date)
+        let issue = result.issues.first { $0.id == "short-cycling" }
+        #expect(issue != nil)
+        #expect(issue?.severity == .critical)
+        // Every claim has to carry the numbers behind it.
+        #expect(issue?.detail.contains("cycles") == true)
+        #expect(result.cyclesPerHour > 5)
+    }
+
+    @Test func frequentButLongCyclesAreJustABusyDay() {
+        // Six an hour, but running twelve minutes each — that is a hot day,
+        // not a fault, and calling it one would teach people to ignore this.
+        var script: [(HVACStatus, Double)] = []
+        for _ in 0..<24 { script += [(.off, 3), (.cooling, 12)] }
+        let history = samples(from: epoch, stepMinutes: 1, script: script)
+        let result = HVACAnalyzer.analyze(samples: history, windowHours: 6,
+                                          now: history.last!.date)
+        #expect(result.cyclesPerHour >= 3)
+        #expect(!result.issues.contains { $0.id == "short-cycling" })
+    }
+
+    @Test func coolingWhileTheRoomWarmsIsCritical() {
+        let history = samples(from: epoch, stepMinutes: 2,
+                              script: [(.off, 30), (.cooling, 90), (.off, 30)],
+                              startTemperature: 24,
+                              // Positive drift while cooling: the wrong way.
+                              driftPerMinute: -0.02, target: 21)
+            .map { sample -> HVACSample in
+                var copy = sample
+                if sample.status == .cooling, let indoor = sample.indoorC {
+                    copy.indoorC = indoor + 2 * sample.date.timeIntervalSince(epoch) / 3600
+                }
+                return copy
+            }
+        let result = HVACAnalyzer.analyze(samples: history, windowHours: 6,
+                                          now: history.last!.date)
+        let issue = result.issues.first { $0.id == "wrong-direction" }
+        #expect(issue?.severity == .critical)
+        // The worst issue leads, so the panel's one line is the urgent one.
+        #expect(result.issues.first?.id == "wrong-direction")
+    }
+
+    @Test func runningWithoutGainingGroundIsFlagged() {
+        // Ninety minutes of heat, and the room never closes the gap.
+        var history: [HVACSample] = []
+        var clock = epoch
+        for _ in 0..<60 {
+            history.append(HVACSample(date: clock, indoorC: 18.0, targetC: 21, status: .heating))
+            clock = clock.addingTimeInterval(120)
+        }
+        let result = HVACAnalyzer.analyze(samples: history, windowHours: 6,
+                                          now: history.last!.date)
+        #expect(result.issues.contains { $0.id == "no-progress" })
+    }
+
+    @Test func aStaleThermostatSaysSoAndNothingElse() {
+        var script: [(HVACStatus, Double)] = []
+        for _ in 0..<24 { script += [(.off, 4), (.cooling, 4)] }
+        let history = samples(from: epoch, stepMinutes: 1, script: script)
+        // An hour after the last reading: everything below it is unknowable.
+        let result = HVACAnalyzer.analyze(samples: history, windowHours: 12,
+                                          now: history.last!.date.addingTimeInterval(3600))
+        #expect(result.issues.count == 1)
+        #expect(result.issues.first?.id == "stale")
+    }
+
+    @Test func tooLittleHistorySaysSoRatherThanAllClear() {
+        let history = samples(from: epoch, stepMinutes: 5, script: [(.off, 20)])
+        let result = HVACAnalyzer.analyze(samples: history, windowHours: 12,
+                                          now: history.last!.date)
+        #expect(!result.hasEnoughHistory)
+        #expect(result.issues.first?.id == "warming-up")
+    }
+
+    @Test func resolutionIsReportedFromTheMedianGap() {
+        // One long gap (the app was asleep) must not make the whole history
+        // look coarse.
+        var history = samples(from: epoch, stepMinutes: 1, script: [(.off, 60)])
+        let resumed = samples(from: history.last!.date.addingTimeInterval(7200),
+                              stepMinutes: 1, script: [(.off, 60)])
+        history += resumed
+        #expect(abs(HVACAnalyzer.medianGapMinutes(history) - 1) < 0.001)
+    }
+
+    @Test func aMovingSetpointExplainsItsOwnSwing() {
+        // Turning the heat up 3° is not a wide-swing fault.
+        var history: [HVACSample] = []
+        var clock = epoch
+        for step in 0..<120 {
+            let target = step < 60 ? 18.0 : 21.0
+            history.append(HVACSample(date: clock, indoorC: target - 0.2,
+                                      targetC: target, status: .heating))
+            clock = clock.addingTimeInterval(180)
+        }
+        let result = HVACAnalyzer.analyze(samples: history, windowHours: 6,
+                                          now: history.last!.date)
+        #expect(!result.issues.contains { $0.id == "wide-swing" })
+    }
+}
+
+@Suite struct HomeModelTests {
+    @Test func contactAndLockSensorsAreNotInvertedByAccident() {
+        // HomeKit reports 0 for "contact detected", which means *shut*, and
+        // 1 for detected motion, which means moving. Getting this backwards
+        // reports every closed door as open.
+        #expect(!HomeKitMapping.isActive(kind: .contact, raw: 0))
+        #expect(HomeKitMapping.isActive(kind: .contact, raw: 1))
+        #expect(HomeKitMapping.isActive(kind: .motion, raw: 1))
+        #expect(!HomeKitMapping.isActive(kind: .motion, raw: 0))
+        // Lock: 1 is secured; jammed (2) and unknown (3) are not "locked".
+        #expect(!HomeKitMapping.isActive(kind: .lock, raw: 1))
+        #expect(HomeKitMapping.isActive(kind: .lock, raw: 2))
+    }
+
+    @Test func readingsReadBackInTheViewersOwnUnits() {
+        let reading = HomeReading(id: "a", name: "Study", kind: .temperature, value: 20)
+        #expect(reading.displayValue(units: .celsius) == "20°")
+        #expect(reading.displayValue(units: .fahrenheit) == "68°")
+        // A difference scales but does not offset — the mistake that turns a
+        // 1 °C swing into a 34 °F one.
+        #expect(SBTemperature.delta(1, units: .fahrenheit) == "1.8°")
+        #expect(SBTemperature.full(20, units: .fahrenheit) == "68°F")
+    }
+
+    @Test func binaryReadingsSpeakTheirOwnLanguage() {
+        var door = HomeReading(id: "d", name: "Back Door", kind: .contact)
+        door.isActive = true
+        #expect(door.displayValue(units: .celsius) == "Open")
+        #expect(door.tone == .warn)
+        var smoke = HomeReading(id: "s", name: "Hall", kind: .smoke)
+        smoke.isActive = false
+        #expect(smoke.tone == .good)
+        smoke.isActive = true
+        #expect(smoke.tone == .bad)
+    }
+
+    @Test func roomsSortAlphabeticallyWithTheUnassignedLast() {
+        let report = HomeSensorReport(readings: [
+            HomeReading(id: "1", name: "A", room: "Study", kind: .temperature, value: 20),
+            HomeReading(id: "2", name: "B", kind: .temperature, value: 19),
+            HomeReading(id: "3", name: "C", room: "Attic", kind: .humidity, value: 40),
+            HomeReading(id: "4", name: "D", room: "Attic", kind: .temperature, value: 24),
+        ])
+        let rooms = report.byRoom.map(\.room)
+        #expect(rooms == ["Attic", "Study", "Elsewhere"])
+        // Within a room, temperature reads first.
+        #expect(report.byRoom.first?.readings.first?.kind == .temperature)
+        #expect(report.averageTemperatureC == 21)
+    }
+
+    @Test func theActiveSetpointIsWhicheverEndTheEquipmentIsChasing() {
+        var readout = ThermostatReadout(id: "t", name: "Hall", currentC: 20,
+                                        heatSetpointC: 19, coolSetpointC: 25,
+                                        mode: .auto, status: .heating)
+        #expect(readout.activeSetpointC == 19)
+        readout.status = .cooling
+        #expect(readout.activeSetpointC == 25)
+        // Idle in a range: whichever end the room is nearer, so the trend
+        // chart draws one line that means something.
+        readout.status = .off
+        #expect(readout.activeSetpointC == 19)
+        readout.currentC = 24
+        #expect(readout.activeSetpointC == 25)
+        #expect(readout.setpointText(units: .celsius) == "19° – 25°")
+    }
+
+    @Test func downsamplingKeepsShortRunsVisible() {
+        // A two-sample cooling blip inside a long idle stretch must survive
+        // thinning, or the chart erases exactly what it exists to show.
+        var history: [HVACSample] = []
+        var clock = Date(timeIntervalSince1970: 1_770_000_000)
+        for step in 0..<600 {
+            let status: HVACStatus = (step == 300 || step == 301) ? .cooling : .off
+            history.append(HVACSample(date: clock, indoorC: 21, targetC: 21, status: status))
+            clock = clock.addingTimeInterval(60)
+        }
+        let thinned = HomeReadout.downsample(history, to: 60)
+        #expect(thinned.count <= 61)
+        #expect(thinned.contains { $0.status == .cooling })
+    }
+
+    @Test func homeSettingsSurviveARoundTripAndAnUnknownKind() {
+        var settings = PanelSettings()
+        settings.homeMode = .diagnostics
+        settings.homeTarget = "climate.hallway"
+        settings.homeRooms = ["Study", "Attic"]
+        settings.homeSensorKinds = [.temperature, .motion]
+        settings.hvacTrendHours = 24
+        settings.showsHVACDiagnostics = false
+
+        let data = try! JSONEncoder().encode(settings)
+        let decoded = try! JSONDecoder().decode(PanelSettings.self, from: data)
+        #expect(decoded.homeMode == .diagnostics)
+        #expect(decoded.homeTarget == "climate.hallway")
+        #expect(decoded.homeRooms == ["Study", "Attic"])
+        #expect(decoded.homeSensorKinds == [.temperature, .motion])
+        #expect(decoded.hvacTrendHours == 24)
+        #expect(!decoded.showsHVACDiagnostics)
+    }
+
+    @Test func oneUnknownSensorKindDoesNotResetTheWholeList() {
+        // Same rule as the Tessie field lists: a kind this build doesn't know
+        // drops out on its own rather than discarding every other choice.
+        let json = Data("""
+        {"homeSensorKinds": ["temperature", "neutrinoFlux", "motion"], "homeMode": "activity"}
+        """.utf8)
+        let settings = try! JSONDecoder().decode(PanelSettings.self, from: json)
+        #expect(settings.homeSensorKinds == [.temperature, .motion])
+        #expect(settings.homeMode == .activity)
+    }
+
+    @Test func aBoardSavedBeforeHomePanelsStillLoads() {
+        let settings = try! JSONDecoder().decode(PanelSettings.self,
+                                                 from: Data(#"{"refreshSeconds": 300}"#.utf8))
+        #expect(settings.homeMode == .rooms)
+        #expect(settings.homeSensorKinds.isEmpty)
+        // Nothing chosen falls back to what the mode implies, not to a fixed
+        // list — a rooms panel showing door sensors would not be a rooms panel.
+        #expect(settings.resolvedSensorKinds == [.temperature, .humidity])
+        var activity = settings
+        activity.homeMode = .activity
+        #expect(activity.resolvedSensorKinds == HomeSensorKind.activitySelection)
+        var sensors = settings
+        sensors.homeMode = .sensors
+        #expect(sensors.resolvedSensorKinds == HomeSensorKind.defaultSelection)
+        #expect(settings.hvacTrendHours == 12)
+    }
+
+    @Test func trendHoursAreClampedToSomethingChartable() {
+        var settings = PanelSettings()
+        settings.hvacTrendHours = 0
+        #expect(settings.resolvedTrendHours == 1)
+        settings.hvacTrendHours = 100_000
+        #expect(settings.resolvedTrendHours == 168)
+    }
+
+    @Test func nestOffersOnlyWhatItsAPIActuallyHas() {
+        // Cameras and free-standing sensors are not in the SDM API, so the
+        // editor must not offer modes that would always fail.
+        #expect(!HomeProvider.nest.supports(.camera))
+        #expect(!HomeProvider.nest.supports(.sensors))
+        #expect(HomeProvider.nest.supports(.thermostat))
+        #expect(HomeProvider.homeKit.supports(.camera))
+        #expect(HomeProvider.homeAssistant.supports(.camera))
+    }
+}
+
+@Suite struct HomeAssistantParsingTests {
+    let states = try! JSONValue.parse("""
+    [
+      {"entity_id":"sensor.study_temp","state":"68.4",
+       "attributes":{"friendly_name":"Study Temperature","device_class":"temperature",
+                     "unit_of_measurement":"°F"},
+       "last_updated":"2026-08-07T12:00:00.123456+00:00"},
+      {"entity_id":"sensor.attic_temp","state":"19.5",
+       "attributes":{"friendly_name":"Attic","device_class":"temperature",
+                     "unit_of_measurement":"°C"},
+       "last_updated":"2026-08-07T12:00:00+00:00"},
+      {"entity_id":"binary_sensor.back_door","state":"on",
+       "attributes":{"friendly_name":"Back Door","device_class":"door"}},
+      {"entity_id":"binary_sensor.hall_motion","state":"off",
+       "attributes":{"friendly_name":"Hall","device_class":"motion"}},
+      {"entity_id":"lock.front","state":"unlocked","attributes":{"friendly_name":"Front"}},
+      {"entity_id":"sensor.random","state":"7","attributes":{"friendly_name":"Nothing"}},
+      {"entity_id":"sensor.dead","state":"unavailable",
+       "attributes":{"friendly_name":"Dead","device_class":"temperature"}},
+      {"entity_id":"climate.hallway","state":"heat_cool",
+       "attributes":{"friendly_name":"Hallway","current_temperature":68.0,
+                     "target_temp_low":66.0,"target_temp_high":75.0,
+                     "current_humidity":44,"hvac_action":"heating","fan_mode":"auto"}}
+    ]
+    """).arrayValue!
+
+    @Test func sensorsAreClassifiedByDeviceClassNotByName() {
+        let readings = HomeAssistantSource.readings(
+            from: states, areas: ["sensor.study_temp": "Study"],
+            kinds: Set(HomeSensorKind.allCases), rooms: [], fahrenheit: false)
+        let ids = readings.map(\.id)
+        #expect(ids.contains("sensor.study_temp"))
+        #expect(ids.contains("binary_sensor.back_door"))
+        #expect(ids.contains("lock.front"))
+        // A sensor with no device class could be anything, so it is left out
+        // rather than guessed at.
+        #expect(!ids.contains("sensor.random"))
+        #expect(readings.first { $0.id == "sensor.study_temp" }?.room == "Study")
+    }
+
+    @Test func eachSensorsOwnUnitWinsOverTheServerDefault() {
+        let readings = HomeAssistantSource.readings(
+            from: states, areas: [:], kinds: [.temperature], rooms: [], fahrenheit: false)
+        let study = readings.first { $0.id == "sensor.study_temp" }
+        let attic = readings.first { $0.id == "sensor.attic_temp" }
+        // 68.4 °F is 20.2 °C — stored in Celsius whatever the sensor said.
+        #expect(abs((study?.value ?? 0) - 20.22) < 0.05)
+        #expect(attic?.value == 19.5)
+    }
+
+    @Test func unavailableEntitiesAreShownDimmedRatherThanDropped() {
+        let readings = HomeAssistantSource.readings(
+            from: states, areas: [:], kinds: [.temperature], rooms: [], fahrenheit: false)
+        let dead = readings.first { $0.id == "sensor.dead" }
+        #expect(dead != nil)
+        #expect(dead?.isReachable == false)
+        #expect(dead?.value == nil)
+    }
+
+    @Test func roomFilteringKeepsOnlyTheRoomsAsked() {
+        let readings = HomeAssistantSource.readings(
+            from: states, areas: ["sensor.study_temp": "Study", "sensor.attic_temp": "Attic"],
+            kinds: [.temperature], rooms: ["Attic"], fahrenheit: false)
+        #expect(readings.map(\.id) == ["sensor.attic_temp"])
+    }
+
+    @Test func climateEntitiesConvertFromTheServersUnit() {
+        let readout = HomeAssistantSource.thermostat(from: states, areas: [:],
+                                                     target: "climate.hallway",
+                                                     fahrenheit: true)
+        #expect(readout?.mode == .auto)
+        #expect(readout?.status == .heating)
+        #expect(abs((readout?.currentC ?? 0) - 20) < 0.05)
+        #expect(abs((readout?.heatSetpointC ?? 0) - 18.89) < 0.05)
+        #expect(readout?.humidity == 44)
+        // In heat_cool the equipment chases the low end while heating.
+        #expect(abs((readout?.activeSetpointC ?? 0) - 18.89) < 0.05)
+    }
+
+    @Test func aThermostatThatNeverReportsItsActionIsUnknownNotIdle() {
+        // Counting silence as "off" would invent idle stretches and make the
+        // cycling figures meaningless.
+        #expect(HomeAssistantSource.status(from: nil, mode: "heat") == .unknown)
+        #expect(HomeAssistantSource.status(from: nil, mode: "off") == .off)
+        #expect(HomeAssistantSource.status(from: "idle", mode: "heat") == .off)
+        #expect(HomeAssistantSource.status(from: "drying", mode: "cool") == .cooling)
+    }
+
+    @Test func fractionalTimestampsParse() {
+        #expect(HomeAssistantSource.date(.string("2026-08-07T12:00:00.123456+00:00")) != nil)
+        #expect(HomeAssistantSource.date(.string("2026-08-07T12:00:00+00:00")) != nil)
+        #expect(HomeAssistantSource.date(.string("nonsense")) == nil)
+    }
+
+    @Test func addressesAreAcceptedTheWayPeopleTypeThem() {
+        #expect(HomeAssistantCredentials.normalizedURL("homeassistant.local:8123")
+                == "http://homeassistant.local:8123")
+        #expect(HomeAssistantCredentials.normalizedURL("https://ha.example.com/lovelace/0")
+                == "https://ha.example.com")
+        #expect(HomeAssistantCredentials.normalizedURL("  ") == nil)
+    }
+}
+
+@Suite struct NestParsingTests {
+    let device = try! JSONValue.parse("""
+    {
+      "name":"enterprises/p1/devices/d1",
+      "type":"sdm.devices.types.THERMOSTAT",
+      "traits":{
+        "sdm.devices.traits.Info":{"customName":""},
+        "sdm.devices.traits.Connectivity":{"status":"ONLINE"},
+        "sdm.devices.traits.Humidity":{"ambientHumidityPercent":35.0},
+        "sdm.devices.traits.Temperature":{"ambientTemperatureCelsius":23.0},
+        "sdm.devices.traits.ThermostatEco":{"availableModes":["MANUAL_ECO","OFF"],
+                                            "mode":"OFF","heatCelsius":15.0,"coolCelsius":28.0},
+        "sdm.devices.traits.ThermostatHvac":{"status":"COOLING"},
+        "sdm.devices.traits.ThermostatMode":{"mode":"COOL"},
+        "sdm.devices.traits.ThermostatTemperatureSetpoint":{"coolCelsius":22.0}
+      },
+      "parentRelations":[{"parent":"enterprises/p1/structures/s1/rooms/r1",
+                          "displayName":"Hallway"}]
+    }
+    """)
+
+    @Test func aThermostatReadsBackWithItsRoomAndSetpoint() {
+        let readout = NestSource.readout(from: device)
+        #expect(readout?.id == "enterprises/p1/devices/d1")
+        // No custom name, so the room stands in — never the 40-character
+        // resource path.
+        #expect(readout?.name == "Hallway")
+        #expect(readout?.room == "Hallway")
+        #expect(readout?.currentC == 23)
+        #expect(readout?.targetC == 22)
+        #expect(readout?.mode == .cool)
+        #expect(readout?.status == .cooling)
+        #expect(readout?.humidity == 35)
+        #expect(readout?.isOnline == true)
+    }
+
+    @Test func ecoHoldsItsOwnSetpointsNotTheScheduledOnes() {
+        var json = device
+        guard case .object(var root) = json, case .object(var traits) = root["traits"]! else {
+            Issue.record("bad fixture"); return
+        }
+        traits["sdm.devices.traits.ThermostatEco"] = .object([
+            "mode": .string("MANUAL_ECO"), "heatCelsius": .number(15), "coolCelsius": .number(28),
+        ])
+        traits["sdm.devices.traits.ThermostatMode"] = .object(["mode": .string("HEATCOOL")])
+        root["traits"] = .object(traits)
+        json = .object(root)
+
+        let readout = NestSource.readout(from: json)
+        #expect(readout?.mode == .eco)
+        #expect(readout?.holdLabel == "Eco")
+        // The Eco range, not the 22° schedule — otherwise the panel shows a
+        // target the equipment is not chasing.
+        #expect(readout?.heatSetpointC == 15)
+        #expect(readout?.coolSetpointC == 28)
+    }
+
+    @Test func aThermostatDoublesAsItsRoomsTemperature() {
+        let readings = NestSource.readings(fromDevice: device)
+        #expect(readings.count == 2)
+        #expect(readings.first?.kind == .temperature)
+        #expect(readings.first?.room == "Hallway")
+        // Two readings from one device must not collide on id.
+        #expect(Set(readings.map(\.id)).count == 2)
+    }
+
+    @Test func theAuthorizationURLIsThePartnerConnectionOne() {
+        // accounts.google.com would authenticate but return no devices — the
+        // partner-connection endpoint is what links the Device Access project.
+        let url = NestCredentials.authorizationURL(
+            NestCredentials.Setup(projectID: "p1", clientID: "c1", clientSecret: "s"))
+        let text = url?.absoluteString ?? ""
+        #expect(text.hasPrefix("https://nestservices.google.com/partnerconnections/p1/auth"))
+        #expect(text.contains("access_type=offline"))
+        // Without prompt=consent Google reuses an earlier grant and returns
+        // no refresh token, which fails an hour later.
+        #expect(text.contains("prompt=consent"))
+        #expect(NestCredentials.authorizationURL(NestCredentials.Setup()) == nil)
+    }
+
+    @Test func thePastedCodeIsTakenHoweverItArrives() {
+        #expect(NestCredentials.authorizationCode(
+            fromPasted: "https://www.google.com/?code=4/abc-DEF&scope=https://x") == "4/abc-DEF")
+        #expect(NestCredentials.authorizationCode(fromPasted: "  4/abc-DEF ") == "4/abc-DEF")
+        #expect(NestCredentials.authorizationCode(fromPasted: "") == nil)
     }
 }

@@ -10,11 +10,29 @@ public struct WidgetPanelInfo: Codable, Hashable, Sendable, Identifiable {
     public var key: String
     public var title: String
     public var kind: PanelKind
+    /// The panel's own settings, so a widget renders it the way the board
+    /// does — temperature units, which home mode a reading came from, how a
+    /// chart is styled. Widgets have no access to `dashboards.json`.
+    public var settings: PanelSettings
 
-    public init(key: String, title: String, kind: PanelKind) {
+    public init(key: String, title: String, kind: PanelKind,
+                settings: PanelSettings = PanelSettings()) {
         self.key = key
         self.title = title
         self.kind = kind
+        self.settings = settings
+    }
+
+    /// Hand-written so a widget still draws from a state file an older build
+    /// wrote. The file is a mirror rewritten every 30 seconds, but failing to
+    /// decode it would blank every complication until then.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        key = try container.decode(String.self, forKey: .key)
+        title = try container.decode(String.self, forKey: .title)
+        kind = try container.decode(PanelKind.self, forKey: .kind)
+        settings = try container.decodeIfPresent(PanelSettings.self, forKey: .settings)
+            ?? PanelSettings()
     }
 }
 

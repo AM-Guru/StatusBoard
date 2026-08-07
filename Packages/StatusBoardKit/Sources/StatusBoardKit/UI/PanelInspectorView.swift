@@ -38,6 +38,11 @@ public struct PanelInspectorView: View {
             TessieCredentials.shared.applyDefaults(to: &connector)
             panel.settings.connector = connector
         }
+        if panel.kind == .homeAssistant {
+            var connector = panel.settings.connector ?? ConnectorConfig()
+            HomeAssistantCredentials.shared.applyDefaults(to: &connector)
+            panel.settings.connector = connector
+        }
         // A panel saved before multi-feed support keeps its one URL in
         // `settings.url`; lift it into the editable list so it shows up as a
         // row rather than looking like the panel lost its feed.
@@ -84,6 +89,7 @@ public struct PanelInspectorView: View {
                         model.store.updatePanel(draft, in: dashboardID)
                         shareCanvasCredentials()
                         shareTessieCredentials()
+                        shareHomeAssistantCredentials()
                         model.engine.refreshNow(panel: draft)
                         dismiss()
                     }
@@ -317,7 +323,7 @@ public struct PanelInspectorView: View {
                     .autocorrectionOff()
                 SecureField("Access token", text: optionalString(canvasConnector.token))
                 Text(draft.kind == .grades
-                     ? "Shows every active course with its current score."
+                     ? "Shows every active course, scored on work a teacher has actually marked. An hourglass counts what's still waiting on a grade; a course with nothing graded yet shows a dash rather than a failing score."
                      : "Due today and late work. Anything finished at 100%, or handed in and waiting on a grade, is hidden. Graded below 100% moves to Re-Do.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -357,6 +363,12 @@ public struct PanelInspectorView: View {
 
         case .tessie:
             tessieSections
+
+        case .homeKit, .homeAssistant, .nest:
+            if let provider = draft.kind.homeProvider {
+                HomeSettingsSection(provider: provider, draft: $draft,
+                                    knownRooms: roomNamesInCurrentData())
+            }
 
         case .health:
             Section("Health") {
@@ -595,6 +607,33 @@ public struct PanelInspectorView: View {
                                              vin: connector.query) else { return }
         model.store.applyTessieCredentials(apiKey: TessieCredentials.shared.apiKey,
                                            excluding: draft.id)
+    }
+
+    private func shareHomeAssistantCredentials() {
+        guard draft.kind == .homeAssistant, let connector = draft.settings.connector,
+              HomeAssistantCredentials.shared.adopt(baseURL: connector.projectURL,
+                                                    token: connector.token) else { return }
+        model.store.applyHomeAssistantCredentials(
+            baseURL: HomeAssistantCredentials.shared.baseURL,
+            token: HomeAssistantCredentials.shared.token,
+            excluding: draft.id)
+    }
+
+    /// The room names present in whatever this panel last loaded — so the
+    /// room filter offers the house's own words rather than asking anyone to
+    /// spell "Primary Bathroom" from memory.
+    private func roomNamesInCurrentData() -> [String] {
+        guard let snapshot = model.snapshots.record(for: draft.snapshotKey)?.snapshot else {
+            return []
+        }
+        switch snapshot {
+        case .homeSensors(let report):
+            return report.byRoom.map(\.room)
+        case .thermostat(let readout):
+            return Array(Set(readout.rooms.compactMap(\.room))).sorted()
+        default:
+            return []
+        }
     }
 
     /// Shared plumbing for the external-service connector kinds.

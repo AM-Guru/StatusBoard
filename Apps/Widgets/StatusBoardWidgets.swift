@@ -48,6 +48,10 @@ struct PanelEntry: TimelineEntry {
     let title: String
     let kind: PanelKind
     let record: SnapshotRecord?
+    /// The panel's settings, mirrored alongside its data — a complication has
+    /// to know whether the board reads in Celsius or Fahrenheit, and which
+    /// question a home panel was asking.
+    var settings = PanelSettings()
 }
 
 struct PanelTimelineProvider: AppIntentTimelineProvider {
@@ -83,7 +87,8 @@ struct PanelTimelineProvider: AppIntentTimelineProvider {
         return PanelEntry(date: Date(),
                           title: configuration.panel?.title ?? info?.title ?? "Status Board",
                           kind: info?.kind ?? .bridge,
-                          record: key.flatMap { state.records[$0] })
+                          record: key.flatMap { state.records[$0] },
+                          settings: info?.settings ?? PanelSettings())
     }
 }
 
@@ -128,6 +133,10 @@ struct PanelWidgetEntryView: View {
                     : "\(Int(level.rounded()))%"
             }
             return vehicle.connection.displayName
+        case .homeSensors(let report):
+            return HomeReadout.compactSummary(report: report, settings: entry.settings)
+        case .thermostat(let readout):
+            return HomeReadout.compactSummary(thermostat: readout, settings: entry.settings)
         default:
             return "—"
         }

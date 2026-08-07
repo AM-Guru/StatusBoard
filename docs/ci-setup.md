@@ -3,6 +3,17 @@
 Status Board builds on **media** (`192.168.1.10`, Apple silicon, Xcode 26.6)
 and uploads to TestFlight with an App Store Connect API key.
 
+Two workflows share that runner:
+
+| Workflow | Fires on | Does |
+| --- | --- | --- |
+| [`Build and Release`](../.github/workflows/release.yml) | any push to `main`, `v*` tags | tests, builds, signs, uploads to TestFlight |
+| [`Deploy website`](../.github/workflows/deploy-website.yml) | pushes to `main` touching `website/` | publishes <https://statusboard.am.guru> — see [docs/website.md](website.md) |
+
+They use separate concurrency groups, so a one-file website change is not stuck
+behind a 90-minute build. The runner still takes one job at a time, so when a
+commit touches both, they run back to back.
+
 `media` is a LAN address, so GitHub-hosted runners cannot SSH to it. The
 workflow therefore runs on a **self-hosted runner installed on media** — that
 is the supported way to build on a machine GitHub can't reach.

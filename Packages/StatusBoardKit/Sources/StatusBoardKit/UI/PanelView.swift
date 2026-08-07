@@ -146,9 +146,14 @@ public struct PanelView: View {
             } else {
                 SnapshotContentView(record: record, settings: panel.settings)
             }
+        case .homeKit where panel.settings.homeMode == .camera:
+            // HomeKit hands cameras over as a view, not as frames, so this
+            // panel draws a live stream instead of a snapshot. Home Assistant
+            // cameras arrive as images and fall through to the renderer below.
+            HomeKitCameraPanelView(panel: panel)
         case .weather, .feed, .calendar, .image, .table, .status, .bridge,
              .github, .appStoreConnect, .supabase, .logs, .health, .canvas,
-             .k12schedule:
+             .k12schedule, .homeKit, .homeAssistant, .nest:
             SnapshotContentView(record: record, settings: panel.settings)
         }
     }

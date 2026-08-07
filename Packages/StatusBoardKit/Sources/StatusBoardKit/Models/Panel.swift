@@ -26,6 +26,9 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
     case schedule
     case assignments
     case tessie
+    case homeKit
+    case homeAssistant
+    case nest
 
     public var id: String { rawValue }
 
@@ -56,6 +59,9 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .schedule: return "Schedule"
         case .assignments: return "Assignments"
         case .tessie: return "Tesla (Tessie)"
+        case .homeKit: return "Home (HomeKit)"
+        case .homeAssistant: return "Home Assistant"
+        case .nest: return "Nest Thermostat"
         }
     }
 
@@ -86,6 +92,9 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .schedule: return "calendar.day.timeline.left"
         case .assignments: return "checklist"
         case .tessie: return "car.side.fill"
+        case .homeKit: return "house.fill"
+        case .homeAssistant: return "house.and.flag.fill"
+        case .nest: return "thermometer.and.liquid.waves"
         }
     }
 
@@ -98,10 +107,12 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .k12schedule: return (3, 2)
         case .grades, .schedule, .assignments: return (4, 2)
         case .tessie: return (4, 3)
+        case .homeKit, .homeAssistant, .nest: return (3, 2)
         case .health: return (2, 1)
         case .text, .status, .mcp, .bridge: return (2, 1)
         }
     }
+
 
     /// Whether the panel's content comes from a periodic fetch task.
     public var isFetched: Bool {
@@ -109,7 +120,8 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .weather, .graph, .progress, .feed, .calendar, .table,
              .status, .mcp, .webClip, .image,
              .github, .appStoreConnect, .supabase, .logs, .health, .canvas,
-             .k12schedule, .grades, .schedule, .assignments, .tessie:
+             .k12schedule, .grades, .schedule, .assignments, .tessie,
+             .homeKit, .homeAssistant, .nest:
             return true
         case .clock, .countdown, .text, .bridge:
             return false
@@ -122,7 +134,25 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
     public var defaultRefreshSeconds: Double {
         switch self {
         case .tessie: return 60
+        // The house changes by the minute, and short-cycling detection is
+        // only as sharp as the sample rate: at five minutes a four-minute
+        // compressor run is invisible. HomeKit reads come off the local
+        // network and Home Assistant off your own server, so a minute costs
+        // nothing. Nest is a metered Google API with a per-structure quota,
+        // hence the slower default.
+        case .homeKit, .homeAssistant: return 60
+        case .nest: return 180
         default: return 300
+        }
+    }
+
+    /// Which of the three home services this panel talks to, if any.
+    public var homeProvider: HomeProvider? {
+        switch self {
+        case .homeKit: return .homeKit
+        case .homeAssistant: return .homeAssistant
+        case .nest: return .nest
+        default: return nil
         }
     }
 
@@ -380,6 +410,47 @@ public struct PanelSettings: Codable, Hashable, Sendable {
     /// on, which one to fall back to before any data has arrived.
     public var tessieContext: TessieContext = .parked
 
+    // Home (HomeKit / Home Assistant / Nest)
+    /// Which question the panel answers — rooms, sensors, activity, a
+    /// thermostat, its trend, its health, or a camera.
+    public var homeMode: HomePanelMode = .rooms
+    /// The HomeKit home to read, when the Apple ID has more than one. Nil
+    /// means the primary home. Unused by the other two providers.
+    public var homeName: String?
+    /// The one accessory a thermostat or camera panel is pinned to: a
+    /// HomeKit service identifier, a Home Assistant entity id, or a Nest
+    /// device resource name. Nil means "the first one found", so a panel
+    /// works before anything is chosen.
+    public var homeTarget: String?
+    /// Rooms to include. Empty means all of them.
+    public var homeRooms: [String] = []
+    /// Which kinds of reading a sensor panel shows. Empty falls back to the
+    /// sensible set for the mode.
+    public var homeSensorKinds: [HomeSensorKind] = []
+    /// How far back the trend chart and the equipment analysis look.
+    public var hvacTrendHours: Double = 12
+    /// Show the equipment-health line under a thermostat panel.
+    public var showsHVACDiagnostics: Bool = true
+    /// Draw the room's other temperatures under a thermostat.
+    public var showsHomeRoomStrip: Bool = true
+
+    /// The reading kinds this panel actually draws — an explicit choice, or
+    /// whatever the mode implies.
+    public var resolvedSensorKinds: [HomeSensorKind] {
+        if !homeSensorKinds.isEmpty { return homeSensorKinds }
+        switch homeMode {
+        case .activity: return HomeSensorKind.activitySelection
+        case .rooms: return [.temperature, .humidity]
+        default: return HomeSensorKind.defaultSelection
+        }
+    }
+
+    /// Clamped so a stray value can't ask the analyzer for a year of history
+    /// or a chart with two points in it.
+    public var resolvedTrendHours: Double {
+        min(168, max(1, hvacTrendHours))
+    }
+
     // Feed / calendar presentation
     public var listDisplay: ListDisplayMode = .list
 
@@ -459,6 +530,8 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         case calendarDaysAhead, listDisplay, healthMetric, courseAliases, hiddenCourses
         case feedSources, feedShowsSourceIcons, feedShowsSourceNames
         case tessieParkedFields, tessieDrivingFields, tessieAutoContext, tessieContext
+        case homeMode, homeName, homeTarget, homeRooms, homeSensorKinds
+        case hvacTrendHours, showsHVACDiagnostics, showsHomeRoomStrip
         case targetDate, text
         case tableHasHeader, tableZebra, tableStatusColoring
         case statusTargets, bridgeKey, mcp, connector
@@ -507,6 +580,21 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         tessieAutoContext = try container.decodeIfPresent(Bool.self, forKey: .tessieAutoContext) ?? true
         tessieContext = (try? container.decodeIfPresent(TessieContext.self, forKey: .tessieContext))
             .flatMap { $0 } ?? .parked
+        homeMode = (try? container.decodeIfPresent(HomePanelMode.self, forKey: .homeMode))
+            .flatMap { $0 } ?? .rooms
+        homeName = try container.decodeIfPresent(String.self, forKey: .homeName)
+        homeTarget = try container.decodeIfPresent(String.self, forKey: .homeTarget)
+        homeRooms = try container.decodeIfPresent([String].self, forKey: .homeRooms) ?? []
+        // Through raw strings for the same reason the Tessie field lists are:
+        // a kind this build doesn't know drops out on its own instead of
+        // throwing away every other choice the user made.
+        homeSensorKinds = try container.decodeIfPresent([String].self, forKey: .homeSensorKinds)
+            .map { $0.compactMap(HomeSensorKind.init(rawValue:)) } ?? []
+        hvacTrendHours = try container.decodeIfPresent(Double.self, forKey: .hvacTrendHours) ?? 12
+        showsHVACDiagnostics = try container.decodeIfPresent(Bool.self,
+                                                             forKey: .showsHVACDiagnostics) ?? true
+        showsHomeRoomStrip = try container.decodeIfPresent(Bool.self,
+                                                           forKey: .showsHomeRoomStrip) ?? true
         listDisplay = (try? container.decodeIfPresent(ListDisplayMode.self, forKey: .listDisplay)) ?? .list
         feedSources = try container.decodeIfPresent([FeedSource].self, forKey: .feedSources) ?? []
         feedShowsSourceIcons = try container.decodeIfPresent(Bool.self, forKey: .feedShowsSourceIcons) ?? true

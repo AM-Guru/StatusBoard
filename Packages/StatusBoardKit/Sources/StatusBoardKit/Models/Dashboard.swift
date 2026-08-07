@@ -74,6 +74,39 @@ public struct Dashboard: Identifiable, Codable, Hashable, Sendable {
         grid.rows += height
         return GridRect(x: 0, y: y, width: min(width, grid.columns), height: height)
     }
+
+    /// A standalone copy of this board under a new name.
+    ///
+    /// The board and every panel get fresh identities so the copy syncs as its
+    /// own board rather than fighting the original for the same record. The
+    /// per-device layouts are keyed by panel ID, so they are remapped onto the
+    /// new panels — otherwise the copy would silently lose every Apple TV and
+    /// Watch arrangement the original was tuned for.
+    public func duplicated(name: String, now: Date = Date()) -> Dashboard {
+        var copy = self
+        copy.id = UUID()
+        copy.name = name
+        copy.createdAt = now
+        copy.modifiedAt = now
+
+        var newIDs: [String: String] = [:]
+        for index in copy.panels.indices {
+            let fresh = UUID()
+            newIDs[copy.panels[index].id.uuidString] = fresh.uuidString
+            copy.panels[index].id = fresh
+        }
+        copy.deviceLayouts = copy.deviceLayouts.mapValues { layout in
+            var remapped = layout
+            remapped.frames = [:]
+            for (panelID, frame) in layout.frames {
+                guard let fresh = newIDs[panelID] else { continue }
+                remapped.frames[fresh] = frame
+            }
+            remapped.hiddenPanelIDs = Set(layout.hiddenPanelIDs.compactMap { newIDs[$0] })
+            return remapped
+        }
+        return copy
+    }
 }
 
 /// The logical grid a board is laid out on. Panels position themselves in grid units.

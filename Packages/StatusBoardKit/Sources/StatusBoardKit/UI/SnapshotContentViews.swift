@@ -43,6 +43,10 @@ public struct SnapshotContentView: View {
             AssignmentsPanelView(digest: digest, settings: settings)
         case .vehicle(let vehicle):
             TessiePanelView(vehicle: vehicle, settings: settings)
+        case .homeSensors(let report):
+            HomeSensorsPanelView(report: report, settings: settings)
+        case .thermostat(let readout):
+            ThermostatPanelView(readout: readout, settings: settings)
         case .error(let message):
             ErrorView(message: message)
         }

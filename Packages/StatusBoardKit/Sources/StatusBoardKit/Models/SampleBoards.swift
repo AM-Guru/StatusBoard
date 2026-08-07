@@ -108,4 +108,48 @@ extension Dashboard {
         ]
         return board
     }
+
+    /// A house at a glance: room temperatures, what the doors are doing, the
+    /// thermostat, its trend and its health.
+    ///
+    /// It is built on HomeKit because that is the one provider that needs no
+    /// setup at all — the accessories are already paired. Changing each
+    /// panel's kind to Home Assistant or Nest in its settings keeps the
+    /// layout and swaps the source.
+    public static func homeBoard() -> Dashboard {
+        func settings(_ configure: (inout PanelSettings) -> Void) -> PanelSettings {
+            var value = PanelSettings()
+            value.refreshSeconds = PanelKind.homeKit.defaultRefreshSeconds
+            configure(&value)
+            return value
+        }
+
+        var board = Dashboard(name: "Home")
+        board.grid = BoardGrid(columns: 8, rows: 5)
+
+        board.panels = [
+            Panel(kind: .homeKit, title: "Rooms",
+                  frame: GridRect(x: 0, y: 0, width: 5, height: 2),
+                  settings: settings { $0.homeMode = .rooms }),
+            Panel(kind: .homeKit, title: "Thermostat",
+                  frame: GridRect(x: 5, y: 0, width: 3, height: 2),
+                  settings: settings { $0.homeMode = .thermostat }),
+            Panel(kind: .homeKit, title: "Temperature Trend",
+                  frame: GridRect(x: 0, y: 2, width: 5, height: 2),
+                  settings: settings {
+                      $0.homeMode = .trend
+                      $0.hvacTrendHours = 12
+                  }),
+            Panel(kind: .homeKit, title: "Equipment Health",
+                  frame: GridRect(x: 5, y: 2, width: 3, height: 3),
+                  settings: settings {
+                      $0.homeMode = .diagnostics
+                      $0.hvacTrendHours = 24
+                  }),
+            Panel(kind: .homeKit, title: "Doors & Motion",
+                  frame: GridRect(x: 0, y: 4, width: 5, height: 1),
+                  settings: settings { $0.homeMode = .activity }),
+        ]
+        return board
+    }
 }

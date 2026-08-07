@@ -20,6 +20,13 @@ public final class DashboardStore {
     /// leftover local one.
     @ObservationIgnored private let remoteIDsURL: URL
     @ObservationIgnored private var remoteKnownIDs: Set<UUID> = []
+    /// The same idea for boards delivered by the Mac bridge. Kept apart from
+    /// the iCloud set because the two sources disagree legitimately: the Mac
+    /// not listing a board means "deleted" only for boards the Mac sent in the
+    /// first place, never for one iCloud delivered from an iPhone the Mac
+    /// hasn't synced with yet.
+    @ObservationIgnored private let bridgeIDsURL: URL
+    @ObservationIgnored private var bridgeKnownIDs: Set<UUID> = []
 
     /// Whether this device can create and edit boards at all.
     ///
@@ -113,6 +120,8 @@ public final class DashboardStore {
         self.authorsBoards = authorsBoards
         self.remoteIDsURL = url.deletingLastPathComponent()
             .appendingPathComponent("icloud-boards.json")
+        self.bridgeIDsURL = url.deletingLastPathComponent()
+            .appendingPathComponent("bridge-boards.json")
         load()
     }
 
@@ -149,6 +158,31 @@ public final class DashboardStore {
         recordUndo(undoActionName)
         dashboards[index] = board
         didEdit(board)
+    }
+
+    /// Copies a board — panels, appearance and per-device layouts — and drops
+    /// the copy in right after the original.
+    @discardableResult
+    public func duplicate(id: Dashboard.ID) -> Dashboard? {
+        guard let index = dashboards.firstIndex(where: { $0.id == id }) else { return nil }
+        let original = dashboards[index]
+        let copy = original.duplicated(
+            name: Self.copyName(for: original.name, taken: Set(dashboards.map(\.name))))
+        recordUndo("Duplicate \(original.name)")
+        dashboards.insert(copy, at: index + 1)
+        selectedDashboardID = copy.id
+        didEdit(copy)
+        return copy
+    }
+
+    /// "Home" → "Home Copy" → "Home Copy 2", so duplicating twice doesn't leave
+    /// two identically named boards in the sidebar.
+    static func copyName(for name: String, taken: Set<String>) -> String {
+        let base = "\(name) Copy"
+        guard taken.contains(base) else { return base }
+        var suffix = 2
+        while taken.contains("\(base) \(suffix)") { suffix += 1 }
+        return "\(base) \(suffix)"
     }
 
     public func delete(id: Dashboard.ID) {
@@ -255,6 +289,46 @@ public final class DashboardStore {
 
         // One undo entry for the whole sweep — it was a single user action.
         recordUndo("Update Tessie API Key")
+        for entry in pending {
+            dashboards[entry.index] = entry.board
+            didEdit(entry.board)
+        }
+        return updated
+    }
+
+    /// Pushes one Home Assistant address and token onto every Home Assistant
+    /// panel, on every board.
+    ///
+    /// One server serves the whole house, so a board built from an upstairs
+    /// temperature panel, a front-door panel and a thermostat would otherwise
+    /// need the same long-lived token pasted three times — and rotating it
+    /// would break whichever ones were forgotten. Same sweep, same single
+    /// undo entry, as the Tessie key above.
+    @discardableResult
+    public func applyHomeAssistantCredentials(baseURL: String?, token: String?,
+                                              excluding panelID: Panel.ID? = nil) -> Int {
+        var pending: [(index: Int, board: Dashboard)] = []
+        var updated = 0
+        for (boardIndex, original) in dashboards.enumerated() {
+            var board = original
+            var changed = false
+            for (panelIndex, panel) in board.panels.enumerated()
+            where panel.kind == .homeAssistant && panel.id != panelID {
+                var connector = panel.settings.connector ?? ConnectorConfig()
+                guard connector.projectURL != baseURL || connector.token != token else { continue }
+                connector.projectURL = baseURL
+                connector.token = token
+                board.panels[panelIndex].settings.connector = connector
+                changed = true
+                updated += 1
+            }
+            guard changed else { continue }
+            board.modifiedAt = Date()
+            pending.append((boardIndex, board))
+        }
+        guard !pending.isEmpty else { return 0 }
+
+        recordUndo("Update Home Assistant Connection")
         for entry in pending {
             dashboards[entry.index] = entry.board
             didEdit(entry.board)
@@ -388,6 +462,50 @@ public final class DashboardStore {
         scheduleSave()
     }
 
+    /// Applies the complete set of boards the Mac bridge just sent.
+    ///
+    /// Display-only devices only. A Mac, iPad or iPhone authors its own boards
+    /// and syncs them through iCloud; letting a bridge on the network replace
+    /// them would let one Mac quietly overwrite everybody's work.
+    ///
+    /// Whole-set semantics, so a board deleted on the Mac disappears here too —
+    /// but only if the bridge is the thing that put it here. Anything iCloud
+    /// delivered stays, because the Mac's list is not authoritative about
+    /// boards made on an iPhone it hasn't seen.
+    public func applyBridgeBoards(_ incoming: [Dashboard]) {
+        guard !authorsBoards else { return }
+
+        for board in incoming {
+            if let index = dashboards.firstIndex(where: { $0.id == board.id }) {
+                guard board.modifiedAt >= dashboards[index].modifiedAt else { continue }
+                guard board != dashboards[index] else { continue }
+                dashboards[index] = board
+            } else {
+                dashboards.append(board)
+            }
+        }
+
+        let incomingIDs = Set(incoming.map(\.id))
+        let withdrawn = bridgeKnownIDs.subtracting(incomingIDs).subtracting(remoteKnownIDs)
+        if !withdrawn.isEmpty {
+            dashboards.removeAll { withdrawn.contains($0.id) }
+        }
+        if bridgeKnownIDs != incomingIDs {
+            bridgeKnownIDs = incomingIDs
+            SBStorage.write(Array(bridgeKnownIDs), to: bridgeIDsURL)
+        }
+
+        // Same rule as iCloud arrivals: a screen showing nothing should show
+        // the first board that turns up.
+        let selectionExists = selectedDashboardID.map { id in
+            dashboards.contains { $0.id == id }
+        } ?? false
+        if !selectionExists {
+            selectedDashboardID = dashboards.first?.id
+        }
+        scheduleSave()
+    }
+
     // MARK: - Persistence
 
     private func didEdit(_ dashboard: Dashboard) {
@@ -397,15 +515,19 @@ public final class DashboardStore {
 
     private func load() {
         remoteKnownIDs = Set(SBStorage.read([UUID].self, from: remoteIDsURL) ?? [])
+        bridgeKnownIDs = Set(SBStorage.read([UUID].self, from: bridgeIDsURL) ?? [])
         var saved = SBStorage.read([Dashboard].self, from: fileURL) ?? []
 
         if !authorsBoards {
             // On a display-only device the local file is nothing but a cache of
-            // what iCloud sent, so anything iCloud never sent is a leftover —
-            // in practice the starter board an older build made here, which is
-            // why the TV could sit on a board that was on no other device.
-            // Dropped locally only: this never deletes anything from iCloud.
-            saved = saved.filter { remoteKnownIDs.contains($0.id) }
+            // what arrived from elsewhere, so anything neither iCloud nor the
+            // bridge ever sent is a leftover — in practice the starter board an
+            // older build made here, which is why the TV could sit on a board
+            // that was on no other device. Dropped locally only: this never
+            // deletes anything from iCloud or the Mac.
+            saved = saved.filter {
+                remoteKnownIDs.contains($0.id) || bridgeKnownIDs.contains($0.id)
+            }
         }
 
         if saved.isEmpty && authorsBoards {

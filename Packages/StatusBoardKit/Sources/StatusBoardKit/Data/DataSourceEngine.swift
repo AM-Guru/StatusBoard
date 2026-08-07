@@ -132,6 +132,15 @@ public final class DataSourceEngine {
             return await AssignmentsSource.fetch(settings: panel.settings)
         case .tessie:
             return await TessieSource.fetch(settings: panel.settings)
+        case .homeKit:
+            // Returns nil for a live camera panel — HomeKit hands over a view,
+            // not an image, so the panel renders it and there is nothing to
+            // store. Leaving the old snapshot alone is the right behaviour.
+            return await HomeKitSource.fetch(settings: panel.settings)
+        case .homeAssistant:
+            return await HomeAssistantSource.fetch(settings: panel.settings)
+        case .nest:
+            return await NestSource.fetch(settings: panel.settings)
         case .webClip:
             #if os(tvOS)
             // No WebKit on tvOS — ask the Mac bridge for an offscreen rendering.

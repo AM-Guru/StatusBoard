@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d11">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3">
-  <script src="script.js?v=3" defer></script>
+  <link rel="stylesheet" href="styles.css?v=4">
+  <script src="script.js?v=4" defer></script>
   <meta name="description" content="Status Board collects no data. No accounts, no analytics, no tracking, and no server behind it.">
   <title>Privacy Policy — Status Board</title>
 </head>
@@ -20,7 +20,7 @@
   <main id="main"><section class="legal">
     <span class="section-number">PRIVACY</span>
     <h1 class="legal-title">Privacy Policy</h1>
-    <p class="meta">Status Board for macOS, iOS, iPadOS, tvOS and watchOS · Last updated 6 August 2026</p>
+    <p class="meta">Status Board for macOS, iOS, iPadOS, tvOS and watchOS · Last updated 7 August 2026</p>
     <p class="lede">Status Board collects nothing. There are no accounts, no sign-up, no analytics, no tracking, no advertising, and no third-party SDKs. The developer operates no server and has no way to see your data.</p>
 
     <h2>What we collect</h2>
@@ -34,7 +34,21 @@
     </ul>
 
     <h2>Services you connect</h2>
-    <p>Status Board can show data from services <em>you</em> choose to configure — among them Canvas / Instructure, K12 OLS, GitHub, App Store Connect, Supabase, RSS feeds, web server logs, MCP servers and weather. When you configure one, your device talks to that service <strong>directly</strong>. Nothing is proxied through, relayed by, or copied to the developer. Your relationship with each of those services is governed by that service's own privacy policy, not this one.</p>
+    <p>Status Board can show data from services <em>you</em> choose to configure — among them Canvas / Instructure, K12 OLS, GitHub, App Store Connect, Supabase, Tessie, RSS feeds, web server logs, MCP servers and weather. When you configure one, your device talks to that service <strong>directly</strong>. Nothing is proxied through, relayed by, or copied to the developer. Your relationship with each of those services is governed by that service's own privacy policy, not this one.</p>
+
+    <h2>Vehicle location and speed limits</h2>
+    <p>A Tesla panel reads your vehicle's state from Tessie using an API key you provide. That includes its location, which the panel can draw on a map. The map is rendered by Apple Maps on your own device.</p>
+    <p>Neither Tesla nor Tessie publishes the posted speed limit for the road a car is on. When — and only when — a Tesla panel is configured to show speed <em>and</em> the vehicle is moving, the app looks the limit up in <a href="https://www.openstreetmap.org/">OpenStreetMap</a> by sending the vehicle's coordinates to <code>overpass-api.de</code>. Nothing else is sent: no API key, no VIN, no vehicle name, and no identifier of any kind. No request is made while the car is parked, and results are reused rather than re-queried while the car stays on the same stretch of road. Remove the Speed field from the panel and no request is ever made.</p>
+
+    <h2>Your location</h2>
+    <p>A weather panel can be set to follow this device. When it is — and only then — the app asks the system for your location, uses it to fetch a forecast, and keeps the last position on the device so the panel still has something to show before the next fix arrives. The coordinates are sent to the forecast service only as the latitude and longitude of the request. They are never sent to the developer, never attached to an identifier, and never stored anywhere other than on your own device. Every other way of choosing a location — a city, an address, a station, or coordinates typed in by hand — needs no location access at all, and you can revoke access at any time in Settings.</p>
+    <p>Searching for a city or an address sends what you typed to Apple's geocoder and to <a href="https://open-meteo.com/">Open-Meteo</a>'s place index in order to turn it into coordinates. The answer is cached on the device so the same search is not repeated on every refresh.</p>
+
+    <h2>Weather stations</h2>
+    <p>A weather panel pointed at a public observation station reads it from that network's own public API — the US National Weather Service, or NOAA's aviation weather service — with no account and no key. A panel pointed at your own weather station reads it at the address you give, which is normally a machine on your own network; that request never leaves your network and never passes through anything the developer runs.</p>
+
+    <h2>Background images</h2>
+    <p>If you give a board or a panel an image URL, your device downloads that image directly from the address you entered and caches it locally. The built-in wallpapers are drawn by the app itself and fetch nothing.</p>
 
     <h2>Health data</h2>
     <p>Health panels read a small set of values (steps, active energy, exercise minutes, heart rate) from HealthKit, with your permission, in order to display them. The app requests <strong>read-only</strong> access, never writes to HealthKit, never syncs Health data to iCloud, and never transmits it off the device. You can revoke access at any time in the Health app.</p>

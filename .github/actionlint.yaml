@@ -1,0 +1,7 @@
+# The runner on media is repository-level and carries these custom labels.
+# Without them actionlint rejects every `runs-on:` in this repository.
+# See docs/ci-setup.md.
+self-hosted-runner:
+  labels:
+    - media
+    - statusboard

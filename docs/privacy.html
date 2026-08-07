@@ -41,8 +41,8 @@ mechanism by which we could receive it.</p>
 <h2>Services you connect</h2>
 <p>Status Board can show data from services <em>you</em> choose to configure —
 among them Canvas / Instructure, K12 OLS, GitHub, App Store Connect, Supabase,
-Tessie (for Tesla vehicles), RSS feeds, web server logs, MCP servers, and
-weather. When you configure one, your device talks to that service
+Tessie (for Tesla vehicles), Home Assistant, Google Nest, RSS feeds, web server
+logs, MCP servers, and weather. When you configure one, your device talks to that service
 <strong>directly</strong>. Nothing is proxied through, relayed by, or copied to
 the developer.</p>
 <p>Your relationship with each of those services is governed by that service's
@@ -96,6 +96,40 @@ minutes, heart rate) from HealthKit, with your permission, in order to display
 them. The app requests <strong>read-only</strong> access, never writes to
 HealthKit, never syncs Health data to iCloud, and never transmits it off the
 device. You can revoke access at any time in the Health app.</p>
+
+<h2>Your home</h2>
+<p>Home panels can read from three places. Which one a panel uses is your
+choice, and none of them involves the developer.</p>
+<p><strong>HomeKit.</strong> With your permission, the app reads the
+accessories already paired to your Apple ID — room temperatures, humidity,
+motion, doors, locks and thermostats — in order to display them. Access is
+<strong>read-only</strong>: Status Board never turns anything on, unlocks
+anything, or changes a setpoint. HomeKit data travels between your own devices
+and your own accessories, and is never transmitted off them. A HomeKit camera
+panel shows the camera's live stream through Apple's own view; the app has no
+access to the frames and nothing is recorded or stored. You can revoke HomeKit
+access at any time in Settings ▸ Privacy &amp; Security.</p>
+<p><strong>Home Assistant.</strong> Your device talks to the Home Assistant
+server at the address you enter — normally a machine on your own network, in
+which case the request never leaves it — using a long-lived access token you
+create. The token is kept in the Keychain. A Home Assistant camera panel
+fetches a still image from your server the same way.</p>
+<p><strong>Google Nest.</strong> If you connect a Google account, your device
+talks to Google's Smart Device Management API directly, using a Device Access
+project and OAuth client that are <em>yours</em>. The sign-in — the client
+secret and the refresh token — is stored in this device's Keychain only. Unlike
+other connectors, it is deliberately never written into a board and never
+synced through iCloud, because a Google refresh token renews itself and can
+reach more of an account than a single panel needs. Disconnecting in the panel's
+settings erases it from this device; revoking it entirely is done in your Google
+Account under Security ▸ Third-party apps.</p>
+<p><strong>Thermostat history.</strong> To show a temperature trend and to work
+out things like short cycling, the app records a reading from your thermostat
+each time a panel refreshes and keeps about a week of them on the device, in the
+same private container as the rest of your panel data. None of the three
+services provides this history, which is why it is recorded locally. It is never
+written to iCloud and never leaves your device. Deleting the panel, or the app,
+removes it.</p>
 
 <h2>Web clips</h2>
 <p>Web clip panels render pages you specify inside a sandboxed web view on your

@@ -100,6 +100,14 @@ public struct StatusBoardCommands: Commands {
 
             Divider()
 
+            Button("Duplicate Board") {
+                if let id = model.store.selectedDashboard?.id {
+                    model.store.duplicate(id: id)
+                }
+            }
+            .keyboardShortcut("d", modifiers: [.command, .option])
+            .disabled(model.store.selectedDashboard == nil)
+
             Button("Delete Board", role: .destructive) {
                 if let id = model.store.selectedDashboard?.id {
                     model.store.delete(id: id)

@@ -4,20 +4,43 @@ import Foundation
 public struct CourseGrade: Codable, Hashable, Sendable, Identifiable {
     public var id: String
     public var course: String
-    /// Percentage, 0–100.
+    /// Percentage, 0–100, over work that has actually been marked. `nil` when
+    /// nothing in the course has been graded yet — which is not the same as
+    /// zero, and is why the panel shows a dash rather than an F.
     public var score: Double?
     public var letter: String?
     public var teacher: String?
     public var url: String?
+    /// Assignments handed in and waiting on a grade, plus the zeros a school's
+    /// missing-work policy fills in before a teacher has actually marked
+    /// anything. Left out of `score`, and shown as a badge so a course whose
+    /// standing is still provisional says so.
+    public var ungradedCount: Int = 0
 
     public init(id: String = UUID().uuidString, course: String, score: Double? = nil,
-                letter: String? = nil, teacher: String? = nil, url: String? = nil) {
+                letter: String? = nil, teacher: String? = nil, url: String? = nil,
+                ungradedCount: Int = 0) {
         self.id = id
         self.course = course
         self.score = score
         self.letter = letter
         self.teacher = teacher
         self.url = url
+        self.ungradedCount = ungradedCount
+    }
+
+    // Written by hand because a synthesized decoder throws on a key it doesn't
+    // find, defaulted property or not — a snapshot saved by an older build, or
+    // synced from a device still running one, would fail to load entirely.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        course = try container.decode(String.self, forKey: .course)
+        score = try container.decodeIfPresent(Double.self, forKey: .score)
+        letter = try container.decodeIfPresent(String.self, forKey: .letter)
+        teacher = try container.decodeIfPresent(String.self, forKey: .teacher)
+        url = try container.decodeIfPresent(String.self, forKey: .url)
+        ungradedCount = try container.decodeIfPresent(Int.self, forKey: .ungradedCount) ?? 0
     }
 
     /// Letter derived from the score when the school doesn't publish one.

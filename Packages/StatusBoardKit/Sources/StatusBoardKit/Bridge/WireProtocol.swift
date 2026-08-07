@@ -47,12 +47,22 @@ public struct WebClipSpec: Codable, Sendable, Hashable {
 public enum BridgeMessage: Codable, Sendable {
     case hello(serverName: String)
     case snapshot(key: String, record: SnapshotRecord)
+    /// Every board the Mac currently holds. Sent whole rather than as a diff:
+    /// boards are small, and a complete set lets a display-only device tell
+    /// "this board was deleted" from "this board hasn't arrived yet" — which a
+    /// stream of individual updates cannot.
+    ///
+    /// This is the path that works when iCloud doesn't: an Apple TV on the same
+    /// network as the Mac gets its boards over Bonjour, with no account, no
+    /// CloudKit container, and nothing leaving the house.
+    case boards([Dashboard])
     case webClipRequest(id: String, spec: WebClipSpec)
     case webClipResponse(id: String, pngBase64: String?, error: String?)
 
     private enum CodingKeys: String, CodingKey {
         case type, serverName, key, record, id, url, width, height, zoom
         case selector, hideSelectors, blocksAds, autoLogin, pngBase64, error
+        case boards
     }
 
     public init(from decoder: Decoder) throws {
@@ -64,6 +74,8 @@ public enum BridgeMessage: Codable, Sendable {
         case "snapshot":
             self = .snapshot(key: try container.decode(String.self, forKey: .key),
                              record: try container.decode(SnapshotRecord.self, forKey: .record))
+        case "boards":
+            self = .boards(try container.decode([Dashboard].self, forKey: .boards))
         case "webclip":
             self = .webClipRequest(
                 id: try container.decode(String.self, forKey: .id),
@@ -97,6 +109,9 @@ public enum BridgeMessage: Codable, Sendable {
             try container.encode("snapshot", forKey: .type)
             try container.encode(key, forKey: .key)
             try container.encode(record, forKey: .record)
+        case .boards(let boards):
+            try container.encode("boards", forKey: .type)
+            try container.encode(boards, forKey: .boards)
         case .webClipRequest(let id, let spec):
             try container.encode("webclip", forKey: .type)
             try container.encode(id, forKey: .id)

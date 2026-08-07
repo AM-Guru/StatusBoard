@@ -74,8 +74,12 @@ public enum AccessibilitySummary {
             let grades = settings.visibleGrades(all)
             guard !grades.isEmpty else { return "Every class is hidden" }
             return grades.map { grade in
-                let score = grade.score.map { "\(Int($0.rounded())) percent" } ?? "no score"
-                return "\(grade.course), \(score)"
+                let score = grade.score.map { "\(Int($0.rounded())) percent" } ?? "nothing graded yet"
+                // The hourglass badge is a shape VoiceOver can't see.
+                let pending = grade.ungradedCount > 0
+                    ? ", \(count(grade.ungradedCount, "assignment")) not graded yet"
+                    : ""
+                return "\(grade.course), \(score)\(pending)"
             }.joined(separator: ". ")
 
         case .schedule(let classes):
@@ -98,6 +102,12 @@ public enum AccessibilitySummary {
 
         case .vehicle(let vehicle):
             return TessieReadout.summary(for: vehicle, settings: settings)
+
+        case .homeSensors(let report):
+            return HomeReadout.summary(report: report, settings: settings)
+
+        case .thermostat(let readout):
+            return HomeReadout.summary(thermostat: readout, settings: settings)
 
         case .image:
             return "Image"

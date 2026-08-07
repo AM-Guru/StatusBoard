@@ -30,7 +30,8 @@ public enum WatchLayout {
         switch kind {
         case .graph, .table, .feed, .calendar, .logs, .webClip, .image,
              .grades, .schedule, .assignments, .canvas, .k12schedule,
-             .github, .appStoreConnect, .supabase, .status, .tessie:
+             .github, .appStoreConnect, .supabase, .status, .tessie,
+             .homeKit, .homeAssistant, .nest:
             return true
         case .clock, .weather, .progress, .text, .countdown, .mcp, .bridge, .health:
             return false

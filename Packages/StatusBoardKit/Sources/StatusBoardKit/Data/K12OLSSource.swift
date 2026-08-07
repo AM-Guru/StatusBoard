@@ -138,23 +138,44 @@ public enum K12OLSSource {
 
     // MARK: - Snapshots
 
-    static func todaySnapshot(_ events: [ClassEvent]) -> DataSnapshot {
-        let visible = events.filter { !$0.isHidden }
-            .sorted { ($0.start ?? .distantFuture) < ($1.start ?? .distantFuture) }
-        guard !visible.isEmpty else {
-            return .text("No classes today — day off 🎉")
-        }
-        let now = Date()
-        let rows = visible.map { event -> [String] in
-            var when = event.timeText
-            if let start = event.start, let end = event.end, now >= start, now <= end {
-                when = "● " + when
-            } else if let end = event.end, now > end {
-                when += " ✓"
+    /// Today's meetings as the shared schedule model, so this panel draws the
+    /// same live rows — countdown, "now" highlight, teacher — as a Schedule
+    /// panel instead of a flat table.
+    ///
+    /// OLS reports a meeting once per enrollment, so the same class can arrive
+    /// twice for one time slot; identical course/time pairs are merged, keeping
+    /// whichever copy carries the most detail. The id is derived from the slot
+    /// rather than a fresh UUID so rows keep their identity across refreshes.
+    static func scheduledClasses(_ events: [ClassEvent]) -> [ScheduledClass] {
+        var merged: [String: ScheduledClass] = [:]
+        var order: [String] = []
+        for event in events where !event.isHidden {
+            let key = "\(event.start?.timeIntervalSince1970 ?? -1)|\(event.displayName)"
+            if var existing = merged[key] {
+                existing.attendanceRequired = existing.attendanceRequired || event.isRequired
+                existing.teacher = existing.teacher ?? (event.teacher.isEmpty ? nil : event.teacher)
+                existing.url = existing.url ?? event.url
+                existing.end = existing.end ?? event.end
+                merged[key] = existing
+            } else {
+                merged[key] = ScheduledClass(id: key,
+                                             course: event.displayName,
+                                             start: event.start,
+                                             end: event.end,
+                                             timeText: event.timeText,
+                                             teacher: event.teacher.isEmpty ? nil : event.teacher,
+                                             attendanceRequired: event.isRequired,
+                                             url: event.url)
+                order.append(key)
             }
-            return [when, event.displayName, event.isRequired ? "required" : ""]
         }
-        return .table(TableData(columns: ["Time", "Class", ""], rows: rows))
+        return order.compactMap { merged[$0] }
+            .sorted { ($0.start ?? .distantFuture) < ($1.start ?? .distantFuture) }
+    }
+
+    static func todaySnapshot(_ events: [ClassEvent]) -> DataSnapshot {
+        // An empty list is not an error — the schedule panel says "day off".
+        .schedule(scheduledClasses(events))
     }
 
     static func nextSnapshot(_ events: [ClassEvent]) -> DataSnapshot {

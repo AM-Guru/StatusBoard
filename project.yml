@@ -113,6 +113,10 @@ targets:
       path: Apps/iOS/StatusBoard.entitlements
       properties:
         com.apple.developer.healthkit: true
+        # Home panels. HomeKit refuses every call without this, and there is
+        # no framework for it on macOS at all — Mac boards see HomeKit values
+        # through iCloud sync from an iPhone, iPad or Apple TV.
+        com.apple.developer.homekit: true
         com.apple.security.application-groups:
           - group.guru.am.statusboard
         com.apple.developer.icloud-container-identifiers:
@@ -131,6 +135,7 @@ targets:
         # Required whenever the HealthKit entitlement is present, even though
         # Status Board only ever reads (HealthSource requests toShare: []).
         NSHealthUpdateUsageDescription: Status Board only reads health data to display it. It never saves anything to Health.
+        NSHomeKitUsageDescription: Status Board shows temperatures, motion, doors and thermostats from your home on dashboard panels you configure. It only reads — it never controls anything.
         # A universal app must declare all four, or the App Store rejects the
         # bundle for not supporting iPad multitasking (error 90474).
         UISupportedInterfaceOrientations:
@@ -172,6 +177,10 @@ targets:
     entitlements:
       path: Apps/tvOS/StatusBoard.entitlements
       properties:
+        # An Apple TV is usually the home hub, which makes it the best-placed
+        # device in the house to read HomeKit — and it is the one running the
+        # wall display.
+        com.apple.developer.homekit: true
         com.apple.developer.icloud-container-identifiers:
           - iCloud.guru.am.statusboard
         com.apple.developer.icloud-services:
@@ -190,6 +199,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Status Board connects to the bridge on your Mac to receive live dashboard data.
         NSLocationWhenInUseUsageDescription: Status Board uses your location only to show the weather where you are, on weather panels you set to Current Location. It stays on this device.
+        NSHomeKitUsageDescription: Status Board shows temperatures, motion, doors and thermostats from your home on dashboard panels you configure. It only reads — it never controls anything.
         NSBonjourServices:
           - _statusboard._tcp
         NSAppTransportSecurity:
@@ -303,6 +313,7 @@ targets:
       path: Apps/watchOS/StatusBoard.entitlements
       properties:
         com.apple.developer.healthkit: true
+        com.apple.developer.homekit: true
         com.apple.security.application-groups:
           - group.guru.am.statusboard
         com.apple.developer.icloud-container-identifiers:
@@ -322,6 +333,7 @@ targets:
         # Required whenever the HealthKit entitlement is present, even though
         # Status Board only ever reads (HealthSource requests toShare: []).
         NSHealthUpdateUsageDescription: Status Board only reads health data to display it. It never saves anything to Health.
+        NSHomeKitUsageDescription: Status Board shows temperatures, motion, doors and thermostats from your home on dashboard panels you configure. It only reads — it never controls anything.
         NSLocalNetworkUsageDescription: Status Board connects to the bridge on your Mac to receive live dashboard data.
         NSLocationWhenInUseUsageDescription: Status Board uses your location only to show the weather where you are, on weather panels you set to Current Location. It stays on this device.
         NSBonjourServices:

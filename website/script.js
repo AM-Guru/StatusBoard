@@ -1,12 +1,97 @@
 /* Status Board — statusboard.am.guru
  *
- * Two jobs: reveal-on-scroll, and a miniature working board that reflows
- * between device sizes the way the real app does. No dependencies, no network.
+ * Three jobs: reveal-on-scroll, the kinetic ticker, and a miniature working
+ * board that reflows between device sizes the way the real app does.
+ * No dependencies, no network.
  */
 (function () {
   "use strict";
 
   var reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  /* ── Kinetic ticker ──────────────────────────────────────────────────
+   * The CSS-only version animates two fixed copies by translateX(-50%),
+   * which only fills the bar when the pair happens to be wider than the
+   * viewport. On a large display it isn't, so a third of the strip sat
+   * empty. This clones the message until the track covers twice the strip
+   * width, then drives it frame by frame, recycling segments off the left
+   * edge — so the bar is full at any width and keeps up with resizes.
+   */
+  function initTicker() {
+    var strip = document.querySelector(".kinetic-strip");
+    var track = strip && strip.querySelector(".kinetic-track");
+    var firstSegment = track && track.firstElementChild;
+    if (!strip || !track || !firstSegment) return;
+
+    var segmentTemplate = firstSegment.cloneNode(true);
+    var pixelsPerMillisecond = 0.05;
+    var offset = 0;
+    var lastTimestamp = 0;
+    var animationFrame = 0;
+
+    track.classList.add("is-managed");
+
+    function fillRunway() {
+      var runway = Math.max(strip.clientWidth, 1) * 2;
+      var attempts = 0;
+      while (track.scrollWidth - offset < runway && attempts < 100) {
+        track.appendChild(segmentTemplate.cloneNode(true));
+        attempts += 1;
+      }
+    }
+
+    // Segments that have travelled fully off the left edge are removed and
+    // their width subtracted, so `offset` never grows without bound.
+    function pruneExpiredSegments() {
+      while (track.children.length > 2) {
+        var expired = track.firstElementChild;
+        var width = expired ? expired.getBoundingClientRect().width : 0;
+        if (!width || offset < width) break;
+        offset -= width;
+        expired.parentNode.removeChild(expired);
+      }
+    }
+
+    function positionTrack() {
+      track.style.transform = "translate3d(" + -offset + "px, 0, 0)";
+    }
+
+    function animate(timestamp) {
+      var elapsed = Math.min(Math.max(timestamp - lastTimestamp, 0), 64);
+      lastTimestamp = timestamp;
+      offset += elapsed * pixelsPerMillisecond;
+      pruneExpiredSegments();
+      fillRunway();
+      positionTrack();
+      animationFrame = requestAnimationFrame(animate);
+    }
+
+    function updateMotionPreference() {
+      cancelAnimationFrame(animationFrame);
+      lastTimestamp = performance.now();
+      fillRunway();
+      positionTrack();
+      if (!reducedMotion.matches) animationFrame = requestAnimationFrame(animate);
+    }
+
+    if ("ResizeObserver" in window) {
+      new ResizeObserver(function () { fillRunway(); positionTrack(); }).observe(strip);
+    } else {
+      window.addEventListener("resize", function () { fillRunway(); positionTrack(); });
+    }
+
+    // Segment widths change once the real face loads, so re-measure then.
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(fillRunway);
+    }
+    if (reducedMotion.addEventListener) {
+      reducedMotion.addEventListener("change", updateMotionPreference);
+    } else if (reducedMotion.addListener) {
+      reducedMotion.addListener(updateMotionPreference);
+    }
+
+    updateMotionPreference();
+  }
 
   /* ── Reveal on scroll ────────────────────────────────────────────── */
   function initReveal() {
@@ -41,12 +126,14 @@
     { id: "ship",    title: "Ship window",   kind: "countdown", span: 1, accent: "#8d68ff" }
   ];
 
+  // The TV deliberately matches the Mac tile size: same four columns, same
+  // board, so switching between them shows the layout rather than a resize.
   var DEVICES = {
-    mac:    { cols: 4, tile: 96,  note: "four columns · every panel at full detail" },
-    ipad:   { cols: 3, tile: 92,  note: "three columns · panels keep their weight" },
-    iphone: { cols: 2, tile: 84,  note: "two columns · wide panels take the full row" },
-    tv:     { cols: 4, tile: 120, note: "four columns, larger type for across the room" },
-    watch:  { cols: 1, tile: 62,  note: "one column · reflowed, not shrunk" }
+    mac:    { cols: 4, tile: 96, note: "four columns · every panel at full detail" },
+    tv:     { cols: 4, tile: 96, note: "four columns · full screen, inside the title-safe area" },
+    ipad:   { cols: 3, tile: 92, note: "three columns · panels keep their weight" },
+    iphone: { cols: 2, tile: 84, note: "two columns · wide panels take the full row" },
+    watch:  { cols: 1, tile: 62, note: "one column · reflowed, not shrunk" }
   };
 
   // A four-column Mac board squeezed into a phone truncates every title, so
@@ -145,7 +232,7 @@
     });
 
     if (caption) {
-      var label = { mac: "Mac", ipad: "iPad", iphone: "iPhone", tv: "Apple TV", watch: "Apple Watch" }[state.device];
+      var label = { mac: "Mac", tv: "Apple TV", ipad: "iPad", iphone: "iPhone", watch: "Apple Watch" }[state.device];
       caption.innerHTML = "";
       caption.appendChild(el("strong", null, label));
       caption.appendChild(document.createTextNode(" · " + device.note));
@@ -333,6 +420,7 @@
 
   function start() {
     initReveal();
+    initTicker();
     initBoard();
   }
 

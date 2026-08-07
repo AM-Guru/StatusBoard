@@ -99,6 +99,9 @@ struct SplitRootView: View {
                             renameText = board.name
                             renamingBoard = board
                         }
+                        Button("Duplicate") {
+                            model.store.duplicate(id: board.id)
+                        }
                         Button("Delete", role: .destructive) {
                             model.store.delete(id: board.id)
                         }
@@ -129,6 +132,11 @@ struct SplitRootView: View {
                             model.store.add(.glassGallery())
                         } label: {
                             Label("Glass", systemImage: "square.on.square.dashed")
+                        }
+                        Button {
+                            model.store.add(.homeBoard())
+                        } label: {
+                            Label("Home", systemImage: "house.fill")
                         }
                     }
                 } label: {
@@ -394,6 +402,9 @@ struct TVRootView: View {
         }
     }
 
+    /// The empty state carries the diagnosis, because this screen is the only
+    /// place the user will ever look. Sitting on a bare "Waiting for Boards"
+    /// while iCloud reported a real error is what made this look unfixable.
     private var waitingForBoards: some View {
         VStack(spacing: 20) {
             Image(systemName: "icloud.and.arrow.down")
@@ -402,11 +413,33 @@ struct TVRootView: View {
             Text("Waiting for Boards")
                 .font(SBTheme.titleFont(size: 44))
                 .foregroundStyle(SBTheme.textPrimary)
-            Text("Boards you build on your iPhone, iPad or Mac appear here over iCloud.")
+            Text("Boards you build on your iPhone, iPad or Mac appear here — over iCloud, or straight from a Mac running Status Board on this network.")
                 .font(.system(size: 26, design: .rounded))
                 .foregroundStyle(SBTheme.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 900)
+
+            VStack(spacing: 10) {
+                Label(model.sync.statusDetail, systemImage: "icloud")
+                    .foregroundStyle(model.sync.isHealthy ? SBTheme.textSecondary : SBTheme.warn)
+                Label(bridgeDetail, systemImage: "laptopcomputer")
+                    .foregroundStyle(SBTheme.textSecondary)
+            }
+            .font(.system(size: 22, design: .rounded))
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 900)
+            .padding(.top, 12)
+        }
+    }
+
+    private var bridgeDetail: String {
+        switch model.bridgeClient.connectionState {
+        case .connected(let name):
+            return "Connected to \(name) — open Status Board there to send boards"
+        case .connecting:
+            return "Connecting to a Mac on this network…"
+        case .disconnected:
+            return "No Mac found on this network"
         }
     }
 
@@ -580,23 +613,14 @@ struct TVMenuView: View {
         return model.store.dashboard(id: selectedBoardID)?.name
     }
 
-    private var cloudIsUnavailable: Bool {
-        if case .unavailable = model.sync.state { return true }
-        return false
-    }
+    private var cloudIsUnavailable: Bool { !model.sync.isHealthy }
 
     private var cloudSummary: String {
-        switch model.sync.state {
-        case .unavailable(let reason):
-            return reason
-        case .syncing:
-            return "Checking iCloud…"
-        case .idle:
-            let count = model.store.dashboards.count
-            let boards = "\(count) board\(count == 1 ? "" : "s") synced"
-            guard let date = model.sync.lastSyncDate else { return boards }
-            return "\(boards) · Checked \(Self.relative.localizedString(for: date, relativeTo: Date()))"
+        let cloud = model.sync.statusDetail
+        guard case .connected(let name) = model.bridgeClient.connectionState else {
+            return cloud
         }
+        return "\(cloud)\nAlso receiving boards from \(name)"
     }
 
     private static let relative: RelativeDateTimeFormatter = {

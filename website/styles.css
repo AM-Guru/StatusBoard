@@ -258,16 +258,25 @@ code, .mono {
   padding: 0.7rem 0;
   white-space: nowrap;
 }
+/* Two copies animated by -50% only fill the strip when the pair is wider
+   than the viewport, which on a large display it isn't. script.js takes the
+   track over, clones the message until it covers the screen and drives it
+   frame by frame; the keyframes below stay as the no-JS fallback. */
 .kinetic-track {
-  display: inline-flex;
+  display: flex;
+  width: max-content;
   animation: marquee 34s linear infinite;
+  will-change: transform;
 }
+.kinetic-track.is-managed { animation: none; }
 .kinetic-track span {
+  flex: 0 0 auto;
   padding-right: 2rem;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 700;
   letter-spacing: 0.16em;
+  white-space: nowrap;
 }
 @keyframes marquee {
   from { transform: translateX(0); }

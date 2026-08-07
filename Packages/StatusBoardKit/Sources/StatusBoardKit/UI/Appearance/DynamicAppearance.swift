@@ -108,6 +108,13 @@ public enum SBDynamicResolver {
             if let color = thresholdColor(panel: panel, snapshot: snapshot, style: style) {
                 return SBDynamicAppearance(backdrop: .wash(color), tint: color)
             }
+            // A running system tints its own numbers warm or cool, which
+            // reads at a glance from across a room — but only tints, since
+            // the wash is reserved for things that are actually wrong.
+            if case .thermostat(let readout)? = snapshot, readout.status.isConditioning {
+                return SBDynamicAppearance(tint: readout.status == .heating
+                                           ? style.bad : Color(hex: 0x4AA8FF))
+            }
             if panel.kind == .clock || panel.kind == .weather {
                 return SBDynamicAppearance(backdrop: .timeOfDay)
             }
@@ -136,6 +143,24 @@ public enum SBDynamicResolver {
             if lowest < 70 { return style.bad }
             if lowest < 85 { return style.warn }
             return style.good
+        case .homeSensors(let report):
+            // Smoke, carbon monoxide and water are the only readings worth
+            // repainting a panel over — a door standing open is the reading
+            // itself, not an alarm about the whole room.
+            let alarms = report.readings.filter {
+                [.smoke, .carbonMonoxide, .leak].contains($0.kind) && $0.isActive == true
+            }
+            return alarms.isEmpty ? nil : style.bad
+        case .thermostat(let readout):
+            guard readout.isOnline else { return style.warn }
+            // Only a real fault colors the panel. "Heating" is a state, not a
+            // problem, and a board that glows amber whenever the furnace runs
+            // teaches people to ignore the color.
+            switch readout.diagnostics?.worstSeverity {
+            case .critical: return style.bad
+            case .warning: return style.warn
+            default: return nil
+            }
         case .error:
             return style.bad
         default:

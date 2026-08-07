@@ -1,0 +1,292 @@
+name: Deploy website
+
+# Publishes website/ to https://statusboard.am.guru on every push to main that
+# touches it. Modelled on the sybilsight-website deploy, which ships to the same
+# Home Assistant host: build a tarball, stage it in a scratch directory beside
+# the live tree, then swap the two with mv. Caddy serves straight from disk, so
+# the swap is the only moment anything changes and a half-copied tree is never
+# reachable. The previous tree is kept at /share/.statusboard-previous.
+#
+# It runs on the same self-hosted runner as the app release — media is on the
+# LAN with /share/statusboard, and a GitHub-hosted runner could reach neither.
+# No secrets are involved: media already holds the SSH key for the
+# `homeassistant` alias, and the preflight step fails loudly if it doesn't.
+#
+# Deploying is only ever a file copy. Editing the Caddyfile still has to be done
+# by hand, followed by `ha addons restart c80c7555_caddy-2`. See docs/website.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - ".github/workflows/deploy-website.yml"
+  workflow_dispatch:
+
+# A separate group from statusboard-release: a one-file copy has no reason to
+# queue behind a 90-minute TestFlight build.
+concurrency:
+  group: statusboard-website-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Publish to statusboard.am.guru
+    # main is production. A manual run from another branch is skipped rather
+    # than quietly publishing a feature branch to the live site.
+    if: >-
+      github.repository == 'AM-Guru/StatusBoard' &&
+      github.ref == 'refs/heads/main' &&
+      github.ref_type == 'branch'
+    runs-on: [self-hosted, macOS, media, statusboard]
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the commit
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Validate website content
+        shell: bash
+        working-directory: website
+        run: |
+          set -euo pipefail
+
+          # Every page and asset the site is expected to serve. A missing or
+          # empty one means something went wrong before we overwrite the live
+          # copy, not after.
+          required=(
+            index.html
+            privacy.html
+            terms.html
+            styles.css
+            script.js
+            favicon.svg
+            og.png
+          )
+          for file in "${required[@]}"; do
+            if [[ ! -s "${file}" ]]; then
+              echo "Missing or empty required file: website/${file}" >&2
+              exit 1
+            fi
+          done
+
+          # tar would follow these into whatever they point at on the runner.
+          if find . -type l -print -quit | grep -q .; then
+            echo "The deployable site must not contain symbolic links." >&2
+            find . -type l >&2
+            exit 1
+          fi
+
+          # The Caddy site block sets style-src 'self' with no 'unsafe-inline',
+          # which blocks inline style="…" *attributes*, not just <style> blocks.
+          # An inline style ships a silently unstyled element, so refuse it here
+          # and add a class in styles.css instead.
+          if grep -nE '<[^>]*[[:space:]]style=' -- *.html; then
+            echo "Inline style attributes are blocked by the site's CSP; move them into styles.css." >&2
+            exit 1
+          fi
+
+          # Cache-busting is manual. If a versioned asset changed but no page
+          # asked for a new ?v=, returning visitors keep the old one — worth a
+          # warning, not a failure, since content-only edits are legitimate.
+          versions="$(grep -ohE '(styles\.css|script\.js)\?v=[0-9]+' -- *.html | sed 's/.*v=//' | sort -u || true)"
+          if [[ "$(wc -l <<<"${versions}")" -gt 1 ]]; then
+            echo "::warning::Pages disagree on the asset version (${versions//$'\n'/, }); visitors may get a mismatched stylesheet and script."
+          fi
+
+          echo "Validated $(find . -type f | wc -l | tr -d ' ') files for deployment."
+
+      - name: Build deployment artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          artifact_dir="${RUNNER_TEMP}/statusboard-website"
+          rm -rf -- "${artifact_dir}"
+          mkdir -p "${artifact_dir}"
+
+          # COPYFILE_DISABLE=1 is not optional on macOS: without it tar writes an
+          # AppleDouble `._name` beside every real file, and Caddy would serve
+          # that directory listing of junk alongside the site.
+          COPYFILE_DISABLE=1 tar \
+            --numeric-owner \
+            --uname "" \
+            --gname "" \
+            --exclude '.DS_Store' \
+            --exclude '._*' \
+            -C website \
+            -czf "${artifact_dir}/statusboard-site.tar.gz" \
+            .
+
+          (
+            cd "${artifact_dir}"
+            shasum -a 256 statusboard-site.tar.gz > statusboard-site.tar.gz.sha256
+            shasum -a 256 --check statusboard-site.tar.gz.sha256
+          )
+
+          echo "Artifact contents:"
+          tar -tzf "${artifact_dir}/statusboard-site.tar.gz" | sort
+
+      - name: Deploy website
+        env:
+          SSH_TARGET: homeassistant
+          DEPLOY_ROOT: /share
+          SITE_NAME: statusboard
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="${RUNNER_TEMP}/statusboard-website/statusboard-site.tar.gz"
+          remote_stage="${DEPLOY_ROOT}/.${SITE_NAME}-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          remote_target="${DEPLOY_ROOT}/${SITE_NAME}"
+          remote_backup="${DEPLOY_ROOT}/.${SITE_NAME}-previous"
+          ssh_options=(
+            -o BatchMode=yes
+            -o ConnectTimeout=15
+            -o ServerAliveInterval=15
+            -o ServerAliveCountMax=3
+          )
+
+          # Every remote script re-checks the paths it was handed before it
+          # removes or moves anything, so a mangled variable can only ever fail.
+          case "${remote_stage}" in
+            /share/.statusboard-deploy-*) ;;
+            *)
+              echo "Refusing unexpected staging path: ${remote_stage}" >&2
+              exit 1
+              ;;
+          esac
+
+          cleanup() {
+            ssh "${ssh_options[@]}" "${SSH_TARGET}" sh -s -- "${remote_stage}" <<'CLEANUP_SCRIPT' || true
+          set -eu
+          stage="$1"
+          case "${stage}" in
+            /share/.statusboard-deploy-*) ;;
+            *) exit 1 ;;
+          esac
+          if [ -e "${stage}" ]; then
+            rm -rf -- "${stage}"
+          fi
+          CLEANUP_SCRIPT
+          }
+          trap cleanup EXIT
+
+          if ! ssh -G "${SSH_TARGET}" >/dev/null; then
+            echo "No SSH configuration for '${SSH_TARGET}' on this runner." >&2
+            exit 1
+          fi
+          if ! ssh "${ssh_options[@]}" "${SSH_TARGET}" true; then
+            echo "The runner cannot reach ${SSH_TARGET} without a prompt. Give the" >&2
+            echo "runner account a passphrase-free key authorised on the host and a" >&2
+            echo "known_hosts entry for it — no repository secret is involved." >&2
+            exit 1
+          fi
+
+          ssh "${ssh_options[@]}" "${SSH_TARGET}" sh -s -- "${DEPLOY_ROOT}" <<'PREFLIGHT_SCRIPT'
+          set -eu
+          deploy_root="$1"
+          [ "${deploy_root}" = /share ]
+          [ -d "${deploy_root}" ]
+          [ -w "${deploy_root}" ]
+          for required_command in tar stat chown chmod find mv; do
+            command -v "${required_command}" >/dev/null
+          done
+          PREFLIGHT_SCRIPT
+
+          ssh "${ssh_options[@]}" "${SSH_TARGET}" sh -s -- "${remote_stage}" <<'STAGE_SCRIPT'
+          set -eu
+          stage="$1"
+          case "${stage}" in
+            /share/.statusboard-deploy-*) ;;
+            *) exit 1 ;;
+          esac
+          if [ -e "${stage}" ]; then
+            rm -rf -- "${stage}"
+          fi
+          mkdir -p "${stage}"
+          STAGE_SCRIPT
+
+          gzip -dc "${archive}" |
+            ssh "${ssh_options[@]}" "${SSH_TARGET}" \
+              tar -xpf - -C "${remote_stage}"
+
+          ssh "${ssh_options[@]}" "${SSH_TARGET}" sh -s -- \
+            "${remote_stage}" "${remote_target}" "${remote_backup}" <<'PUBLISH_SCRIPT'
+          set -eu
+          stage="$1"
+          target="$2"
+          backup="$3"
+
+          case "${stage}" in
+            /share/.statusboard-deploy-*) ;;
+            *) exit 1 ;;
+          esac
+          [ "${target}" = /share/statusboard ]
+          [ "${backup}" = /share/.statusboard-previous ]
+          [ -s "${stage}/index.html" ]
+          # Swapping a symlinked target would replace the link, not the tree.
+          [ ! -L "${target}" ]
+
+          # Inherit whatever owns the live directory rather than assuming root,
+          # so Caddy keeps reading the files after the swap.
+          owner_group="0:0"
+          if [ -d "${target}" ]; then
+            owner_group="$(stat -c '%u:%g' "${target}")"
+          fi
+          chown -R "${owner_group}" "${stage}"
+          chmod -R g+rwX "${stage}"
+          find "${stage}" -type d -exec chmod g+s {} +
+
+          if [ -e "${backup}" ]; then
+            rm -rf -- "${backup}"
+          fi
+
+          moved_previous=false
+          if [ -e "${target}" ]; then
+            mv "${target}" "${backup}"
+            moved_previous=true
+          fi
+
+          # Put the old tree back if the swap fails, rather than leaving the
+          # site with no document root at all.
+          if ! mv "${stage}" "${target}"; then
+            if [ "${moved_previous}" = true ]; then
+              mv "${backup}" "${target}"
+            fi
+            exit 1
+          fi
+          PUBLISH_SCRIPT
+
+          trap - EXIT
+          echo "Deployed ${GITHUB_SHA} to ${SSH_TARGET}:${remote_target}"
+
+      - name: Verify the published site
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Caddy serves from disk with no cache in front, so the swap is live
+          # immediately — but check rather than assume, and compare against the
+          # bytes we just shipped so a stale tree can't pass.
+          expected="$(wc -c < website/index.html | tr -d ' ')"
+          for attempt in 1 2 3; do
+            status="$(curl -fsS --max-time 20 -o "${RUNNER_TEMP}/published.html" \
+              -w '%{http_code}' https://statusboard.am.guru/ || echo 000)"
+            served="$(wc -c < "${RUNNER_TEMP}/published.html" 2>/dev/null | tr -d ' ' || echo 0)"
+            if [[ "${status}" == "200" && "${served}" == "${expected}" ]]; then
+              echo "https://statusboard.am.guru/ is serving this commit (${served} bytes)."
+              exit 0
+            fi
+            echo "Attempt ${attempt}: status ${status}, ${served} bytes, expected ${expected}."
+            sleep 5
+          done
+
+          echo "The site did not come back with the deployed index.html." >&2
+          echo "The previous tree is still on the host at /share/.statusboard-previous." >&2
+          exit 1

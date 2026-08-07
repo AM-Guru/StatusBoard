@@ -80,10 +80,27 @@ struct GradesPanelView: View {
                 .background(tint, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(SchoolStyle.alias(grade.course, in: settings))
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(sbStyle.textPrimary)
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(SchoolStyle.alias(grade.course, in: settings))
+                        .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        .foregroundStyle(sbStyle.textPrimary)
+                        .lineLimit(1)
+                    // Says the standing is provisional, so a low number — or a
+                    // dash — reads as "not marked yet" rather than "doing badly".
+                    if grade.ungradedCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "hourglass")
+                                .font(.system(size: 8, weight: .bold))
+                            Text("\(grade.ungradedCount)")
+                                .font(.system(size: 9, weight: .bold, design: .rounded))
+                        }
+                        .foregroundStyle(sbStyle.textSecondary)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(sbStyle.separator, in: Capsule())
+                        .accessibilityLabel("\(grade.ungradedCount) not graded yet")
+                    }
+                }
                 // A slim bar makes relative standing obvious without a chart.
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {

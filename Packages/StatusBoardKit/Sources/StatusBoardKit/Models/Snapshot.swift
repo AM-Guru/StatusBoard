@@ -14,6 +14,8 @@ public enum DataSnapshot: Codable, Hashable, Sendable {
     case schedule([ScheduledClass])
     case assignments(AssignmentDigest)
     case vehicle(TessieVehicle)
+    case homeSensors(HomeSensorReport)
+    case thermostat(ThermostatReadout)
     case error(String)
 }
 

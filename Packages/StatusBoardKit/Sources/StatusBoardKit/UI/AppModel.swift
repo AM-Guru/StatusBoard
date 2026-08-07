@@ -45,7 +45,8 @@ public final class AppModel {
 
         snapshots.widgetPanelProvider = { [weak store] in
             (store?.allPanels ?? []).map {
-                WidgetPanelInfo(key: $0.snapshotKey, title: $0.title, kind: $0.kind)
+                WidgetPanelInfo(key: $0.snapshotKey, title: $0.title, kind: $0.kind,
+                                settings: $0.settings)
             }
         }
         bridgeClient.onSnapshot = { [weak snapshots] key, record in
@@ -59,10 +60,17 @@ public final class AppModel {
                 self.engine.refreshNow(panel: panel)
             }
         }
+        // Boards over the local network, for the displays that can't author
+        // their own. The store ignores this on any device that can, so an iPad
+        // joining the bridge for panel data never has its boards replaced.
+        bridgeClient.onBoards = { [weak store] boards in
+            store?.applyBridgeBoards(boards)
+        }
         #if os(macOS)
         bridgeServer.onSnapshot = { [weak snapshots] key, record in
             snapshots?.setAll([key: record])
         }
+        bridgeServer.boardProvider = { [weak store] in store?.dashboards ?? [] }
         #endif
         engine.bridgeClient = bridgeClient
 
@@ -78,6 +86,11 @@ public final class AppModel {
 
     public func start() {
         sync.start()
+        // Apple TV and the Watch have no way to ask for boards themselves —
+        // there's no "pull to refresh" on a wall display — so they poll.
+        if !store.authorsBoards {
+            sync.startAutomaticRefresh()
+        }
         bridgeClient.startBrowsing()
         #if os(macOS)
         bridgeServer.start()
@@ -110,6 +123,10 @@ public final class AppModel {
                 guard let self else { return }
                 self.engine.rebuild(panels: self.store.allPanels)
                 self.scheduleSpotlightIndex()
+                #if os(macOS)
+                // Displays subscribed to this Mac follow board edits live.
+                self.bridgeServer.publishBoards()
+                #endif
                 self.observeDashboards()
             }
         }

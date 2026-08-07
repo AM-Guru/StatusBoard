@@ -121,23 +121,54 @@ public enum AppStoreConnectSource {
             let token = try jwt(keyID: keyID, issuerID: issuerID, privateKeyPEM: pem)
             switch config.mode {
             case "builds":
-                let json = try await request("builds?limit=10&sort=-uploadedDate&include=preReleaseVersion",
-                                             token: token)
-                let rows = (json["data"]?.arrayValue ?? []).map { build -> [String] in
-                    let attributes = build["attributes"]
-                    let version = attributes?["version"]?.stringValue ?? "—"
-                    let state = friendlyBuildState(attributes?["processingState"]?.stringValue)
-                    var when = "—"
-                    if let uploaded = attributes?["uploadedDate"]?.stringValue,
-                       let date = try? Date(uploaded, strategy: .iso8601) {
-                        when = date.formatted(.relative(presentation: .named))
-                    }
-                    let expired = attributes?["expired"]?.doubleValue == 1 ? "expired" : "active"
-                    return [version, state, expired, when]
+                // One row per app, newest build only. Deduplicating a page of
+                // /builds would not do: the feed is team-wide and ordered by
+                // date, so an app that has not shipped lately falls off the
+                // end of any page size and silently vanishes from the table.
+                // Asking each app for its own newest build cannot lose one.
+                let appList = try await request("apps?limit=200&fields[apps]=name", token: token)
+                let apps = (appList["data"]?.arrayValue ?? []).compactMap { app -> AppRef? in
+                    guard let id = app["id"]?.stringValue else { return nil }
+                    return AppRef(id: id, name: app["attributes"]?["name"]?.stringValue ?? "—")
                 }
+                let latest = await withTaskGroup(of: LatestBuild?.self) { group in
+                    for app in apps {
+                        group.addTask {
+                            // A single app failing (or having no builds yet)
+                            // drops its row rather than blanking the panel;
+                            // a bad key already failed the apps call above.
+                            guard let json = try? await request(
+                                    "builds?limit=1&sort=-uploadedDate&filter[app]=\(app.id)",
+                                    token: token),
+                                  let build = json["data"]?[0] else { return nil }
+                            let attributes = build["attributes"]
+                            var uploaded: Date?
+                            if let raw = attributes?["uploadedDate"]?.stringValue {
+                                uploaded = try? Date(raw, strategy: .iso8601)
+                            }
+                            return LatestBuild(
+                                app: app.name,
+                                version: attributes?["version"]?.stringValue ?? "—",
+                                state: friendlyBuildState(attributes?["processingState"]?.stringValue),
+                                uploaded: uploaded)
+                        }
+                    }
+                    var found: [LatestBuild] = []
+                    for await result in group {
+                        if let result { found.append(result) }
+                    }
+                    return found
+                }
+                // The group finishes in whatever order the requests return.
+                let rows = latest
+                    .sorted { ($0.uploaded ?? .distantPast) > ($1.uploaded ?? .distantPast) }
+                    .map { build -> [String] in
+                        let when = build.uploaded?.formatted(.relative(presentation: .named)) ?? "—"
+                        return [build.app, build.version, build.state, when]
+                    }
                 return rows.isEmpty
                     ? .text("No builds")
-                    : .table(TableData(columns: ["Build", "State", "Status", "Uploaded"], rows: rows))
+                    : .table(TableData(columns: ["App", "Build", "State", "Uploaded"], rows: rows))
 
             case "reviews":
                 guard let appID = config.query, !appID.isEmpty else {
@@ -174,6 +205,19 @@ public enum AppStoreConnectSource {
         } catch {
             return .error(error.localizedDescription)
         }
+    }
+
+    /// An app on the team, and the newest build belonging to it.
+    struct AppRef: Sendable {
+        let id: String
+        let name: String
+    }
+
+    struct LatestBuild: Sendable {
+        let app: String
+        let version: String
+        let state: String
+        let uploaded: Date?
     }
 
     static func friendlyBuildState(_ raw: String?) -> String {

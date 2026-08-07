@@ -18,13 +18,42 @@ only the Caddy site block was needed.
 
 ## Deploying a change
 
+Nothing to do: push to `main`. The
+[`Deploy website`](../.github/workflows/deploy-website.yml) workflow fires on
+any commit that touches `website/`, on the same self-hosted runner as the app
+release (`media` is on the LAN; a GitHub-hosted runner could reach neither the
+runner nor `/share`). It needs no secrets — media already holds the SSH key for
+the `homeassistant` alias.
+
+The job validates, packages, publishes and then checks the live site:
+
+1. **Validate.** Every required file is present and non-empty, there are no
+   symlinks, and no page carries an inline `style="…"` attribute — see the CSP
+   section below. Mismatched `?v=` asset versions across pages are a warning,
+   not a failure.
+2. **Package.** `COPYFILE_DISABLE=1 tar` with `.DS_Store` and `._*` excluded,
+   then a SHA-256 of the archive, checked before it is sent.
+3. **Publish.** The tree is extracted into `/share/.statusboard-deploy-<run>`,
+   then swapped into place with `mv`. That swap is the only moment anything
+   changes, so a half-copied tree is never reachable; the tree it replaced is
+   kept at `/share/.statusboard-previous`, and a failed swap puts it back.
+4. **Verify.** `https://statusboard.am.guru/` must come back 200 with exactly
+   the `index.html` that was just shipped, retried three times.
+
+`workflow_dispatch` re-runs it by hand — useful after restoring a backup.
+
+To deploy without GitHub (the runner is down, or you're testing locally):
+
 ```bash
 cd website && COPYFILE_DISABLE=1 tar czf - index.html privacy.html terms.html styles.css script.js favicon.svg og.png | ssh homeassistant 'tar xzf - -C /share/statusboard'
 ```
 
 `COPYFILE_DISABLE=1` matters: without it macOS `tar` ships AppleDouble `._`
-files alongside every real one. Caddy serves files straight from disk, so a
-copy is live immediately — no restart. Only edits to the **Caddyfile** need
+files alongside every real one. Note this copy is not atomic and does not
+delete files removed from the repository — the workflow's swap does both.
+
+Caddy serves files straight from disk, so a copy is live immediately — no
+restart. Only edits to the **Caddyfile** need
 `ha addons restart c80c7555_caddy-2`.
 
 ## The content security policy

@@ -27,6 +27,13 @@ public final class BridgeClient {
     @ObservationIgnored public var onSnapshot: ((String, SnapshotRecord) -> Void)?
     /// Fired when a subscription reaches the connected state.
     @ObservationIgnored public var onConnect: (() -> Void)?
+    /// The complete board set the Mac holds, sent on connect and after every
+    /// edit there. Only display-only devices act on it.
+    @ObservationIgnored public var onBoards: (([Dashboard]) -> Void)?
+
+    /// When boards last arrived over the bridge. Shown on Apple TV, where the
+    /// Mac may be the only thing delivering them.
+    public private(set) var lastBoardDelivery: Date?
 
     @ObservationIgnored private var browser: NWBrowser?
     @ObservationIgnored private var connection: NWConnection?
@@ -156,6 +163,9 @@ public final class BridgeClient {
             onConnect?()
         case .snapshot(let key, let record):
             onSnapshot?(key, record)
+        case .boards(let boards):
+            lastBoardDelivery = Date()
+            onBoards?(boards)
         case .webClipResponse(let id, let pngBase64, _):
             let data = pngBase64.flatMap { Data(base64Encoded: $0) }
             pendingWebClips.removeValue(forKey: id)?.resume(returning: data)

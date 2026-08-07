@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d11">
-  <meta name="description" content="Status Board is a free, open-source (MIT) self-hosted dashboard for Apple devices. Build live boards from panels, web clips, your own scripts and the services you already use — on Mac, iPhone, iPad, Apple TV and Apple Watch. No accounts, no tracking, no server.">
+  <meta name="description" content="Status Board is a free, open-source (MIT) self-hosted dashboard for Apple devices. Build live boards from 25 kinds of panel, web clips, your own scripts and the services you already use — then theme them and lay them out per device on Mac, iPhone, iPad, Apple TV and Apple Watch. No accounts, no tracking, no server.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://statusboard.am.guru/">
   <meta property="og:title" content="Status Board — a self-hosted dashboard for every screen you own">
@@ -20,8 +20,8 @@
   <meta name="twitter:image" content="https://statusboard.am.guru/og.png">
   <title>Status Board — A self-hosted dashboard for every screen you own</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=3">
-  <script src="script.js?v=3" defer></script>
+  <link rel="stylesheet" href="styles.css?v=4">
+  <script src="script.js?v=4" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -38,6 +38,7 @@
       <nav aria-label="Primary navigation">
         <a href="#board">The board</a>
         <a href="#panels">Panels</a>
+        <a href="#look">Appearance</a>
         <a href="#bridge">The bridge</a>
         <a href="#screens">Every screen</a>
         <a href="#privacy">Privacy</a>
@@ -58,8 +59,9 @@
       <p class="hero-lede reveal">
         Status Board is a self-hosted dashboard for Apple devices. Build a board out of
         live panels, clip a region of any web page, wire in the services you already use,
-        and push your own values straight from the terminal. The same board follows you
-        from the Mac on your desk to the TV on the wall to the watch on your wrist.
+        and push your own values straight from the terminal. Theme it, give each screen
+        its own layout, and the same board follows you from the Mac on your desk to the
+        TV on the wall to the watch on your wrist.
       </p>
       <div class="hero-actions reveal">
         <a class="button button-primary" href="#get">Join the beta <span aria-hidden="true">↓</span></a>
@@ -67,7 +69,8 @@
       </div>
       <div class="hero-meta reveal" aria-label="At a glance">
         <span>macOS, iOS, iPadOS, tvOS, watchOS</span>
-        <span>24 panel kinds</span>
+        <span>25 panel kinds</span>
+        <span>9 themes</span>
         <span>No account</span>
         <span>No tracking</span>
         <span>MIT licensed</span>
@@ -91,7 +94,8 @@
           This is a running board, not a screenshot — the numbers below are updating as
           you read. Switch devices to watch the same board reflow: panels keep their
           reading order and their relative weight instead of being shrunk into
-          illegibility.
+          illegibility. When the automatic reflow isn't what you want, any device can be
+          given a layout of its own.
         </p>
       </div>
 
@@ -104,9 +108,9 @@
 
         <div class="device-switch" role="group" aria-label="Preview device">
           <button type="button" data-device="mac" aria-pressed="true">Mac</button>
+          <button type="button" data-device="tv" aria-pressed="false">Apple TV</button>
           <button type="button" data-device="ipad" aria-pressed="false">iPad</button>
           <button type="button" data-device="iphone" aria-pressed="false">iPhone</button>
-          <button type="button" data-device="tv" aria-pressed="false">Apple TV</button>
           <button type="button" data-device="watch" aria-pressed="false">Apple Watch</button>
         </div>
 
@@ -127,26 +131,57 @@
     <section id="panels">
       <div class="section-heading reveal">
         <span class="section-number">02 / PANELS</span>
-        <h2>Twenty-four kinds of panel, arranged how you like.</h2>
+        <h2>Twenty-five kinds of panel, arranged how you like.</h2>
         <p>
-          Drag panels onto a grid, size them, tint them, set a refresh interval, and give
+          Drag panels onto a grid, size them, theme them, set a refresh interval, and give
           any numeric panel a threshold so it shouts when something crosses a line.
+          Duplicate a panel, copy one between boards, or undo the lot.
         </p>
       </div>
       <ul class="panel-kinds reveal">
         <li>Clock</li><li>Weather</li><li>Graph</li><li>Progress</li><li>RSS Feed</li>
         <li>Calendar</li><li>Web Clip</li><li>Image</li><li>Text</li><li>Countdown</li>
         <li>Table</li><li>Service Status</li><li>MCP Tool</li><li>Bridge Value</li>
-        <li>GitHub</li><li>App Store Connect</li><li>Supabase</li><li>Logs</li>
-        <li>Health</li><li>Canvas</li><li>Class Schedule</li><li>Grades</li>
-        <li>Schedule</li><li>Assignments</li>
+        <li>GitHub</li><li>App Store Connect</li><li>Supabase</li><li>Web Logs</li>
+        <li>Health</li><li>Tesla</li><li>Canvas</li><li>Class Schedule</li>
+        <li>Grades</li><li>Schedule</li><li>Assignments</li>
       </ul>
+    </section>
+
+    <!-- ── Appearance ─────────────────────────────────────────────────── -->
+    <section id="look">
+      <div class="section-heading reveal">
+        <span class="section-number">03 / APPEARANCE</span>
+        <h2>A board you'd leave on the wall.</h2>
+        <p>
+          Nine themes, procedural wallpapers and a backdrop that runs behind the whole
+          board rather than repeating inside every panel — so one picture reads across
+          the grid, with the gaps cut into it.
+        </p>
+      </div>
+      <div class="grid reveal">
+        <div class="card">
+          <div class="glyph" aria-hidden="true">◐</div>
+          <h3>Nine themes</h3>
+          <p>Status Board, Glass, Carbon, Slate, Paper, Terminal, Blueprint, Sunset and Aurora — or mix your own colours. Set one for the board and override it on any single panel.</p>
+        </div>
+        <div class="card teal">
+          <div class="glyph" aria-hidden="true">▤</div>
+          <h3>One backdrop, many panels</h3>
+          <p>Aurora, Dusk, Grid, Starfield, Topography and Halftone are drawn from maths, not shipped as images, so they stay sharp at any size and line up exactly across every panel that masks them.</p>
+        </div>
+        <div class="card violet">
+          <div class="glyph" aria-hidden="true">✳</div>
+          <h3>Styled by its own data</h3>
+          <p>A weather panel paints the sky it's reporting. A service check goes green, amber or red. A number past its threshold changes with it. Or let the board simply warm and cool through the day.</p>
+        </div>
+      </div>
     </section>
 
     <!-- ── Web clips ──────────────────────────────────────────────────── -->
     <section id="clips">
       <div class="section-heading reveal">
-        <span class="section-number">03 / WEB CLIPS</span>
+        <span class="section-number">04 / WEB CLIPS</span>
         <h2>Take the one part of a page that matters.</h2>
         <p>
           Point Status Board at a page, highlight the region you actually want, and keep
@@ -176,7 +211,7 @@
     <!-- ── Connectors ─────────────────────────────────────────────────── -->
     <section id="connectors">
       <div class="section-heading reveal">
-        <span class="section-number">04 / CONNECTORS</span>
+        <span class="section-number">05 / CONNECTORS</span>
         <h2>Wired into what you already run.</h2>
         <p>
           Every connector is configured by you, with your own credentials, kept in the
@@ -192,13 +227,15 @@
         <div class="card violet"><div class="glyph" aria-hidden="true">MCP</div><h3>MCP tools</h3><p>Call any tool exposed by an MCP server and put its answer on the board.</p></div>
         <div class="card"><div class="glyph" aria-hidden="true">◷</div><h3>Any JSON or CSV</h3><p>Point a panel at a URL, pull a value out with a JSON path, and chart it.</p></div>
         <div class="card teal"><div class="glyph" aria-hidden="true">🎓</div><h3>School</h3><p>Canvas and K12 OLS: grades, today's classes, and what's late, due or needs a re-do.</p></div>
+        <div class="card violet"><div class="glyph" aria-hidden="true">⚡︎</div><h3>Tesla, through Tessie</h3><p>Two layouts in one panel: charge, range, climate and locks while it's parked; speed, power and arrival time once it's moving. Read from Tessie's cache, so watching the car never wakes it.</p></div>
+        <div class="card"><div class="glyph" aria-hidden="true">☂</div><h3>Weather, from where you choose</h3><p>A city, exact coordinates, your current location, an official NWS or airport METAR station — or your own weather station in the garden.</p></div>
       </div>
     </section>
 
     <!-- ── Bridge ─────────────────────────────────────────────────────── -->
     <section id="bridge">
       <div class="section-heading reveal">
-        <span class="section-number">05 / THE BRIDGE</span>
+        <span class="section-number">06 / THE BRIDGE</span>
         <h2>Self-hosted, all the way down.</h2>
         <p>
           Run the Mac app as a bridge and it becomes the source of truth on your own
@@ -247,27 +284,31 @@
     <!-- ── Every screen ───────────────────────────────────────────────── -->
     <section id="screens">
       <div class="section-heading reveal">
-        <span class="section-number">06 / EVERY SCREEN</span>
+        <span class="section-number">07 / EVERY SCREEN</span>
         <h2>It goes where you look.</h2>
         <p>
           Boards sync between your own devices through your private iCloud, and the data
-          spills out of the app into the rest of the system.
+          spills out of the app into the rest of the system. Every screen can take the
+          shared layout or keep one of its own.
         </p>
       </div>
       <div class="grid reveal">
-        <div class="card"><div class="glyph" aria-hidden="true">􀟜</div><h3>Widgets</h3><p>Home Screen, Lock Screen, Mac desktop and watch face — any panel, any size.</p></div>
-        <div class="card teal"><div class="glyph" aria-hidden="true">⌚︎</div><h3>Apple Watch</h3><p>The board reflowed for a wrist: full-width where detail matters, paired up where it doesn't, on every watch size.</p></div>
-        <div class="card violet"><div class="glyph" aria-hidden="true">📺</div><h3>Apple TV</h3><p>A wall-sized board that cycles through your dashboards on its own.</p></div>
-        <div class="card"><div class="glyph" aria-hidden="true">◉</div><h3>Live Activities</h3><p>Pin a number you're watching right now to the Lock Screen and Dynamic Island.</p></div>
-        <div class="card teal"><div class="glyph" aria-hidden="true">⌘</div><h3>Menu bar &amp; Control Center</h3><p>A glance from the Mac menu bar, and a Control Center control on iPhone.</p></div>
-        <div class="card violet"><div class="glyph" aria-hidden="true">⌕</div><h3>Spotlight &amp; Handoff</h3><p>Search your panels from Spotlight, and pick a board up on the next device.</p></div>
+        <div class="card"><div class="glyph" aria-hidden="true">⊞</div><h3>A layout per device</h3><p>Move a panel on the TV without disturbing the Mac, or hide one on the phone entirely. Anything you don't override keeps following the shared board.</p></div>
+        <div class="card teal"><div class="glyph" aria-hidden="true">⤢</div><h3>Design for a screen you're not at</h3><p>The device simulator renders the board at another screen's real size, so you can lay out the Apple TV from your Mac and trust what you're seeing.</p></div>
+        <div class="card violet"><div class="glyph" aria-hidden="true">􀟜</div><h3>Widgets</h3><p>Home Screen, Lock Screen, Mac desktop and watch face — any panel, any size.</p></div>
+        <div class="card"><div class="glyph" aria-hidden="true">⌚︎</div><h3>Apple Watch</h3><p>The board reflowed for a wrist: full-width where detail matters, paired up where it doesn't, on every watch size.</p></div>
+        <div class="card teal"><div class="glyph" aria-hidden="true">📺</div><h3>Apple TV</h3><p>A wall-sized board that cycles through your dashboards on its own, laid out inside the title-safe area so overscan never eats a panel.</p></div>
+        <div class="card violet"><div class="glyph" aria-hidden="true">◉</div><h3>Live Activities</h3><p>Pin a number you're watching right now to the Lock Screen and Dynamic Island.</p></div>
+        <div class="card"><div class="glyph" aria-hidden="true">⌘</div><h3>Menu bar &amp; Control Center</h3><p>A glance from the Mac menu bar, and a Control Center control on iPhone.</p></div>
+        <div class="card teal"><div class="glyph" aria-hidden="true">⌕</div><h3>Spotlight &amp; Handoff</h3><p>Search your panels from Spotlight, and pick a board up on the next device.</p></div>
+        <div class="card violet"><div class="glyph" aria-hidden="true">⤴</div><h3>Share the board itself</h3><p>Export any board as a poster-sized image — live web panels rendered as stills — and send it anywhere.</p></div>
       </div>
     </section>
 
     <!-- ── Privacy ────────────────────────────────────────────────────── -->
     <section id="privacy">
       <div class="section-heading reveal">
-        <span class="section-number">07 / PRIVACY</span>
+        <span class="section-number">08 / PRIVACY</span>
         <h2>There is no server. That's the point.</h2>
       </div>
       <div class="privacy-card reveal">
@@ -288,6 +329,7 @@
           <li><span>Fetched values, Health data included, are never written to iCloud</span></li>
           <li><span>Credentials and tokens live in the system Keychain</span></li>
           <li><span>Your device talks to each service directly; nothing is proxied</span></li>
+          <li><span>Location is only read if you ask a weather panel to follow this device</span></li>
           <li><span>Bridge traffic never leaves your local network</span></li>
           <li><span>App Store privacy label: <strong>Data Not Collected</strong></span></li>
           <li><span>All of it <a href="https://github.com/AM-Guru/StatusBoard">open source</a>, so you can check</span></li>
@@ -298,7 +340,7 @@
     <!-- ── Open source ────────────────────────────────────────────────── -->
     <section id="open">
       <div class="section-heading reveal">
-        <span class="section-number">08 / OPEN SOURCE</span>
+        <span class="section-number">09 / OPEN SOURCE</span>
         <h2>Free, and the whole thing is readable.</h2>
         <p>
           Status Board is open source under the MIT licence. The app, the bridge,
@@ -337,7 +379,7 @@
     <!-- ── Get it ─────────────────────────────────────────────────────── -->
     <section id="get">
       <div class="section-heading reveal">
-        <span class="section-number">09 / GET IT</span>
+        <span class="section-number">10 / GET IT</span>
         <h2>Put your first board up today.</h2>
         <p>Status Board is in TestFlight now for Mac, iPhone, iPad, Apple TV and Apple Watch.</p>
       </div>

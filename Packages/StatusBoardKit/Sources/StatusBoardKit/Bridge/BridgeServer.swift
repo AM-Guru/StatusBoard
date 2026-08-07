@@ -25,6 +25,10 @@ public final class BridgeServer {
 
     /// Feeds the local Mac app's snapshot store.
     @ObservationIgnored public var onSnapshot: ((String, SnapshotRecord) -> Void)?
+    /// Supplies this Mac's boards to subscribing displays. Set by AppModel;
+    /// while it's nil the bridge behaves exactly as it did before and sends
+    /// snapshots only.
+    @ObservationIgnored public var boardProvider: (() -> [Dashboard])?
 
     @ObservationIgnored private var listener: NWListener?
     /// All open connections (HTTP and subscribers) — retained until closed.
@@ -104,8 +108,22 @@ public final class BridgeServer {
         subscriberCount = subscribers.count
         append(log: "Device subscribed (\(subscribers.count) connected)")
         connection.send(.hello(serverName: Host.current().localizedName ?? "Mac"))
+        if let boards = boardProvider?() {
+            connection.send(.boards(boards))
+            append(log: "Sent \(boards.count) board\(boards.count == 1 ? "" : "s") to device")
+        }
         for (key, record) in records {
             connection.send(.snapshot(key: key, record: record))
+        }
+    }
+
+    /// Pushes the current board set to every subscribed display. Called when a
+    /// board is created, edited or deleted on this Mac, so a wall display
+    /// follows along without waiting on iCloud.
+    public func publishBoards() {
+        guard !subscribers.isEmpty, let boards = boardProvider?() else { return }
+        for connection in subscribers.values {
+            connection.send(.boards(boards))
         }
     }
 

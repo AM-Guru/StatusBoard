@@ -45,6 +45,9 @@ the developer has no way to see your data.
 | Grades | Every class with its current score, colour-graded and ranked |
 | Schedule | The classes left today, with a live countdown, teacher, and a tap-to-join link |
 | Assignments | Due today, late, and a Re-Do list of work graded below full marks |
+| Home (HomeKit) | Room temperatures, any sensor you pick, motion/doors/locks, a thermostat, its trend, its equipment health, or a live camera — from accessories already paired to your Apple ID (iPhone/iPad/Apple TV/Watch) |
+| Home Assistant | The same seven views, read from your own server over its REST API — grouped by the areas you already defined, with camera snapshots and trend history backfilled from its recorder |
+| Nest Thermostat | Ambient temperature, setpoint, mode and equipment status per thermostat, plus trend and health, through Google's Smart Device Management API |
 
 - **Web clip region picker**: browse any page inside the app, sign in if needed
   (Browse mode shares cookies with the panels), then tap the element you want to
@@ -100,7 +103,16 @@ the developer has no way to see your data.
   auto-cycling through boards on a timer, wall-display style, and a **Screen
   Fit** choice — boards stay inside the TV-safe area by default so overscan
   can't crop a panel, or fill the whole screen on a display that shows every
-  pixel.
+  pixel. An Apple TV also checks iCloud on its own — hard while the screen is
+  empty, then every quarter hour — because a wall display has nobody standing
+  at it to pull for a refresh.
+- **Boards over the local network** — an Apple TV or Watch subscribed to the
+  Mac bridge receives its boards straight from that Mac, and follows edits made
+  there live. No iCloud account, no CloudKit container, nothing leaving the
+  house. It runs alongside iCloud rather than instead of it: a board made on
+  your iPhone still arrives over iCloud even if the Mac has never seen it.
+  Devices that author their own boards (Mac, iPad, iPhone) ignore boards
+  offered by a bridge, so joining one for panel data can't overwrite your work.
 - **Apple Watch app + complications** — browse panels, tap for full-screen live
   views, and put any panel on your watch face (inline, circular, rectangular,
   and corner complications). Dashboards arrive via iCloud; URL panels fetch
@@ -147,8 +159,8 @@ the developer has no way to see your data.
   (`data.items[*].price`, wildcards and negative indices supported).
 - **Mac bridge**: the macOS app runs a Bonjour-advertised server that accepts
   pushes from shell scripts, CI, and AI tools, and relays them live to every
-  iPhone/iPad/Apple TV on the network. It also renders web clips offscreen for
-  tvOS (which has no WebKit).
+  iPhone/iPad/Apple TV on the network. It also hands its boards to display-only
+  devices, and renders web clips offscreen for tvOS (which has no WebKit).
 - **MCP client**: panels can call tools on MCP servers over streamable HTTP
   (all platforms) or stdio (macOS spawns the server process).
 - **Widgets**: a configurable WidgetKit widget (iOS + macOS) shows any panel's
@@ -164,6 +176,9 @@ Apps/
 Packages/StatusBoardKit/        Everything else — models, stores, sync,
                                 data sources, bridge, MCP, and all SwiftUI views
     Sources/sbctl/              Terminal CLI for pushing data to the bridge
+website/                        statusboard.am.guru — no build step; pushing to
+                                main publishes it (docs/website.md)
+docs/                           CI, release and API notes
 ```
 
 ## Building
@@ -335,6 +350,47 @@ their services directly from each device:
 - **Web Logs** — point it at an access log in combined format. For local files,
   serve the file over HTTP or stream it through the bridge
   (`tail -f access.log | sbctl pipe --key weblog`).
+
+## Home panels
+
+Three providers, one set of panels. Each panel picks a **mode** — Room
+Temperatures, Sensors, Motion & Doors, Thermostat, Temperature Trend, Equipment
+Health, or Camera — and the provider answers it. A HomeKit thermostat, a Home
+Assistant `climate` entity and a Nest unit are normalized to the same reading,
+so they render identically and can sit side by side on one board.
+
+- **HomeKit** needs no setup at all: it reads the accessories already paired to
+  your Apple ID, and only reads — it never controls anything. There is **no
+  HomeKit framework on macOS**, so add these panels on an iPhone, iPad or Apple
+  TV; a Mac board shows the values they fetched, through iCloud sync, the same
+  way Health panels work.
+- **Home Assistant** wants your server's address and a long-lived access token
+  (profile ▸ Security). Rooms come from Home Assistant's own **areas**, read
+  over the REST API via a rendered template, so nothing has to be typed twice.
+  It's also the only provider with history: a new trend panel backfills from
+  the recorder instead of starting blank.
+- **Nest** goes through Google's Smart Device Management API, which needs a
+  [Device Access](https://developers.google.com/nest/device-access) project (a
+  one-time $5 registration with Google) and an OAuth client of type *Web
+  application*. Connect the account from the panel's settings: it opens
+  Google's consent page in your real browser — Google blocks embedded web views
+  for sign-in — and you paste the resulting address back. Two limits are
+  Google's, not ours: **Nest Temperature Sensors are not exposed** by the API
+  (only thermostats are, so "per room" means per thermostat), and Nest cameras
+  are offered as a WebRTC stream rather than an image, so there is no Nest
+  camera panel. If you run Home Assistant, its Nest integration exposes those
+  cameras as ordinary snapshot entities the Home Assistant panel can show.
+
+**Equipment health** is the part none of the three services provides. Status
+Board records a sample every refresh, keeps about a week of them on the device,
+and works out cycles per hour, average run length, runtime share, and warnings:
+short cycling, running without closing the gap to the setpoint, a room moving
+the *wrong way* while the system runs, near-constant runtime, high humidity
+while cooling, and a wide swing on a steady setpoint. Every warning quotes the
+numbers behind it, and nothing is claimed before there's about an hour of
+history. Short runs are only visible if the panel refreshes at least as often as
+they last, so home panels default to a **one-minute** refresh (Nest to three, to
+stay inside Google's quota).
 
 ## Notes
 

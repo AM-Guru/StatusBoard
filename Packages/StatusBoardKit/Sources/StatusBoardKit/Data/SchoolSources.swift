@@ -33,11 +33,97 @@ public enum GradesSource {
                     url: "\(host)/courses/\(id)/grades"))
             }
             guard !grades.isEmpty else { return .error("No active courses") }
+            grades = await regraded(grades, host: host, token: token)
             grades.sort { ($0.score ?? -1) > ($1.score ?? -1) }
             return .grades(grades)
         } catch {
             return .error(error.localizedDescription)
         }
+    }
+
+    /// Replaces Canvas's headline score with one computed from work that has
+    /// genuinely been marked, and counts what is still outstanding.
+    ///
+    /// A course whose gradebook can't be read keeps the score Canvas gave it,
+    /// so a single failing request can't blank out the whole panel.
+    static func regraded(_ grades: [CourseGrade], host: String,
+                         token: String) async -> [CourseGrade] {
+        await withTaskGroup(of: (String, Tally?).self) { group in
+            for grade in grades {
+                group.addTask {
+                    let json = try? await CanvasSource.request(
+                        host: host, token: token,
+                        path: "/api/v1/courses/\(grade.id)/students/submissions"
+                            + "?student_ids[]=self&include[]=assignment&per_page=100")
+                    guard let submissions = json?.arrayValue else { return (grade.id, nil) }
+                    return (grade.id, tally(submissions))
+                }
+            }
+            var tallies: [String: Tally] = [:]
+            for await (id, tally) in group {
+                if let tally { tallies[id] = tally }
+            }
+            return grades.map { grade in
+                guard let tally = tallies[grade.id] else { return grade }
+                var grade = grade
+                grade.ungradedCount = tally.ungraded
+                if let score = tally.score {
+                    grade.score = score
+                } else {
+                    // Nothing marked yet: a number here would be invented, and
+                    // the school's letter would only restate it.
+                    grade.score = nil
+                    grade.letter = nil
+                }
+                return grade
+            }
+        }
+    }
+
+    struct Tally: Equatable {
+        var earned: Double = 0
+        var possible: Double = 0
+        var ungraded: Int = 0
+
+        var score: Double? {
+            possible > 0 ? (earned / possible) * 100 : nil
+        }
+    }
+
+    /// Canvas's "current score" counts every number in the gradebook, including
+    /// the zeros a missing-work policy fills in before a teacher has looked at
+    /// the assignment. Early in a term that reads as a course sitting at 25%
+    /// when nothing has really been graded — and it turns the whole panel red.
+    ///
+    /// So the score is rebuilt here from marks a person actually gave, and
+    /// everything still in flight is counted instead of scored.
+    static func tally(_ submissions: [JSONValue]) -> Tally {
+        var tally = Tally()
+        for submission in submissions {
+            guard let assignment = submission["assignment"] else { continue }
+            // Excused work, practice work, and anything the teacher left out of
+            // the final grade are neither earned nor owed.
+            if submission["excused"]?.doubleValue == 1 { continue }
+            if assignment["omit_from_final_grade"]?.doubleValue == 1 { continue }
+            guard let points = assignment["points_possible"]?.doubleValue, points > 0 else { continue }
+
+            let state = submission["workflow_state"]?.stringValue ?? ""
+            if state == "submitted" || state == "pending_review" {
+                tally.ungraded += 1     // handed in, waiting on the teacher
+                continue
+            }
+            // No score means either not yet due or a grade the teacher hasn't
+            // posted — neither is something to average.
+            guard state == "graded", let score = submission["score"]?.doubleValue else { continue }
+            if score == 0, submission["missing"]?.doubleValue == 1,
+               submission["submitted_at"]?.stringValue == nil {
+                tally.ungraded += 1     // placeholder zero, not a mark
+                continue
+            }
+            tally.earned += score
+            tally.possible += points
+        }
+        return tally
     }
 }
 
@@ -50,19 +136,7 @@ public enum ScheduleSource {
         } ?? K12Session.defaultPortal
         do {
             let events = try await K12OLSSource.todayClasses(portal: portal)
-            let classes = events
-                .filter { !$0.isHidden }
-                .sorted { ($0.start ?? .distantFuture) < ($1.start ?? .distantFuture) }
-                .map { event in
-                    ScheduledClass(course: event.displayName,
-                                   start: event.start,
-                                   end: event.end,
-                                   timeText: event.timeText,
-                                   teacher: event.teacher.isEmpty ? nil : event.teacher,
-                                   attendanceRequired: event.isRequired,
-                                   url: event.url)
-                }
-            return .schedule(classes)
+            return .schedule(K12OLSSource.scheduledClasses(events))
         } catch {
             return .error(error.localizedDescription)
         }
