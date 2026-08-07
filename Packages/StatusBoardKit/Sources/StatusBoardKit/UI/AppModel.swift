@@ -74,9 +74,10 @@ public final class AppModel {
                 self.engine.refreshNow(panel: panel)
             }
         }
-        // Boards over the local network, for the displays that can't author
-        // their own. The store ignores this on any device that can, so an iPad
-        // joining the bridge for panel data never has its boards replaced.
+        // Boards over the local network. A display takes the Mac's list whole;
+        // a device that authors its own only ever adds from it, so an iPhone
+        // that iCloud has failed still finds the boards on the Wi-Fi while its
+        // own are left alone.
         bridgeClient.onBoards = { [weak store] boards in
             store?.applyBridgeBoards(boards)
         }

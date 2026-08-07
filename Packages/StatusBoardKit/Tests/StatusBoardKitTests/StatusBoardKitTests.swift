@@ -1828,6 +1828,97 @@ struct WatchLayoutTests {
         #expect(store.dashboards.map(\.name).sorted() == ["From Mac", "From iPhone"])
     }
 
+    // MARK: - Bridge boards on a device that authors its own
+
+    /// The reported bug: iCloud can't get boards from the Mac to the iPhone —
+    /// wrong CloudKit environment, undeployed production schema, whatever — and
+    /// the phone sits on the starter board while a Mac holding every board is
+    /// on the same Wi-Fi.
+    @Test func anAuthoringDeviceAdoptsBoardsItHasNeverSeen() throws {
+        let url = try tempURL()
+        let store = DashboardStore(fileURL: url, authorsBoards: true)
+        let starter = store.dashboards
+        store.applyBridgeBoards([Dashboard(name: "Master Bedroom")])
+
+        #expect(store.dashboards.count == starter.count + 1)
+        #expect(store.dashboards.contains { $0.name == "Master Bedroom" })
+    }
+
+    /// A Mac on the network is not authoritative here. It may add; it may never
+    /// rewrite work done on this device.
+    @Test func aBridgeBoardNeverOverwritesALocallyAuthoredOne() throws {
+        let url = try tempURL()
+        let store = DashboardStore(fileURL: url, authorsBoards: true)
+        var mine = Dashboard(name: "Mine")
+        store.add(mine)
+        mine.name = "Renamed By The Mac"
+        mine.modifiedAt = Date().addingTimeInterval(600)
+        store.applyBridgeBoards([mine])
+
+        #expect(store.dashboards.contains { $0.name == "Mine" })
+        #expect(!store.dashboards.contains { $0.name == "Renamed By The Mac" })
+    }
+
+    /// Deleting an adopted board has to stick. Re-adding it on the Mac's next
+    /// broadcast would make deletion impossible on the same network.
+    @Test func anAdoptedBoardStaysDeleted() throws {
+        let url = try tempURL()
+        let store = DashboardStore(fileURL: url, authorsBoards: true)
+        let fromMac = Dashboard(name: "Scratch")
+        store.applyBridgeBoards([fromMac])
+        store.delete(id: fromMac.id)
+        store.applyBridgeBoards([fromMac])
+
+        #expect(!store.dashboards.contains { $0.id == fromMac.id })
+    }
+
+    /// Edits on the Mac do reach a board this device took from the Mac — that
+    /// is the whole point of the fallback — but only when its copy is newer.
+    @Test func anAdoptedBoardFollowsTheMac() throws {
+        let url = try tempURL()
+        let store = DashboardStore(fileURL: url, authorsBoards: true)
+        var fromMac = Dashboard(name: "Office")
+        store.applyBridgeBoards([fromMac])
+
+        fromMac.name = "Office v2"
+        fromMac.modifiedAt = Date().addingTimeInterval(600)
+        store.applyBridgeBoards([fromMac])
+        #expect(store.dashboards.contains { $0.name == "Office v2" })
+
+        var stale = fromMac
+        stale.name = "Stale"
+        stale.modifiedAt = Date().addingTimeInterval(-600)
+        store.applyBridgeBoards([stale])
+        #expect(store.dashboards.contains { $0.name == "Office v2" })
+    }
+
+    /// The Mac dropping a board says nothing here: this device's own boards,
+    /// and boards iCloud delivered, are not the Mac's to withdraw.
+    @Test func anAuthoringDeviceKeepsBoardsTheMacStopsSending() throws {
+        let url = try tempURL()
+        let store = DashboardStore(fileURL: url, authorsBoards: true)
+        let fromMac = Dashboard(name: "Office")
+        store.applyBridgeBoards([fromMac])
+        store.applyBridgeBoards([])
+
+        #expect(store.dashboards.contains { $0.name == "Office" })
+    }
+
+    @Test func adoptedBoardsSurviveARelaunch() throws {
+        let url = try tempURL()
+        let first = DashboardStore(fileURL: url, authorsBoards: true)
+        let fromMac = Dashboard(name: "Office")
+        first.applyBridgeBoards([fromMac])
+        first.saveNow()
+
+        let second = DashboardStore(fileURL: url, authorsBoards: true)
+        #expect(second.dashboards.contains { $0.name == "Office" })
+        // And the adopted set came back too, so a second broadcast is a no-op
+        // rather than a duplicate.
+        second.applyBridgeBoards([fromMac])
+        #expect(second.dashboards.filter { $0.id == fromMac.id }.count == 1)
+    }
+
     /// Last-writer-wins, same as iCloud: a stale copy from a Mac that has been
     /// asleep must not undo an edit that already arrived.
     @Test func anOlderBridgeCopyDoesNotOverwriteANewerBoard() throws {
@@ -1847,13 +1938,19 @@ struct WatchLayoutTests {
 
     /// A Mac, iPad or iPhone authors its own boards. A bridge on the network
     /// must never be able to replace them.
-    @Test func anAuthoringDeviceIgnoresBridgeBoards() throws {
+    ///
+    /// This used to assert that bridge boards were ignored outright, which also
+    /// stranded an iPhone that iCloud couldn't reach next to a Mac holding
+    /// every board. Adding is now allowed; replacing still isn't, and that is
+    /// what this pins — see `aBridgeBoardNeverOverwritesALocallyAuthoredOne`
+    /// and `anAuthoringDeviceKeepsBoardsTheMacStopsSending`.
+    @Test func anAuthoringDeviceKeepsItsOwnBoardsWhenTheBridgeSpeaks() throws {
         let url = try tempURL()
         let store = DashboardStore(fileURL: url, authorsBoards: true)
         let before = store.dashboards.map(\.id)
         store.applyBridgeBoards([Dashboard(name: "From Some Other Mac")])
 
-        #expect(store.dashboards.map(\.id) == before)
+        #expect(before.allSatisfy { id in store.dashboards.contains { $0.id == id } })
     }
 
     @Test func boardsRoundtripThroughTheWireProtocol() throws {

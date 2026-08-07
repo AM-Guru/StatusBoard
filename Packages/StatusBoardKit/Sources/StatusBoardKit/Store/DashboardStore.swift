@@ -27,6 +27,16 @@ public final class DashboardStore {
     /// hasn't synced with yet.
     @ObservationIgnored private let bridgeIDsURL: URL
     @ObservationIgnored private var bridgeKnownIDs: Set<UUID> = []
+    /// Boards an *authoring* device has taken from the bridge, remembered for
+    /// as long as the install lives — including after the user deletes one.
+    ///
+    /// Two jobs, and the second is why this outlives the board itself. It marks
+    /// which local boards the Mac is allowed to update, so a board made on this
+    /// iPhone is never touched by a Mac on the network. And it stops a board
+    /// deleted here coming back on the Mac's next broadcast, which is what
+    /// makes a purely additive merge safe to run every time one arrives.
+    @ObservationIgnored private let bridgeAdoptedIDsURL: URL
+    @ObservationIgnored private var bridgeAdoptedIDs: Set<UUID> = []
 
     /// Whether this device can create and edit boards at all.
     ///
@@ -122,6 +132,8 @@ public final class DashboardStore {
             .appendingPathComponent("icloud-boards.json")
         self.bridgeIDsURL = url.deletingLastPathComponent()
             .appendingPathComponent("bridge-boards.json")
+        self.bridgeAdoptedIDsURL = url.deletingLastPathComponent()
+            .appendingPathComponent("bridge-adopted.json")
         load()
     }
 
@@ -473,7 +485,10 @@ public final class DashboardStore {
     /// delivered stays, because the Mac's list is not authoritative about
     /// boards made on an iPhone it hasn't seen.
     public func applyBridgeBoards(_ incoming: [Dashboard]) {
-        guard !authorsBoards else { return }
+        guard !authorsBoards else {
+            adoptBridgeBoards(incoming)
+            return
+        }
 
         for board in incoming {
             if let index = dashboards.firstIndex(where: { $0.id == board.id }) {
@@ -506,6 +521,63 @@ public final class DashboardStore {
         scheduleSave()
     }
 
+    /// Takes boards from the Mac bridge on a device that authors its own.
+    ///
+    /// iCloud is the proper channel between two devices that both make boards,
+    /// and when it works this does nothing: the ids already match. It matters
+    /// when iCloud *can't* work — the two ends signed into different CloudKit
+    /// environments, a container whose schema was never deployed to production,
+    /// an account not signed in yet — where a Mac sitting on the same Wi-Fi
+    /// already has every board and the iPhone was showing the starter board
+    /// with no way to reach them.
+    ///
+    /// Strictly additive, because a Mac on the network is not authoritative
+    /// here. Boards this device made are never modified and never removed; the
+    /// Mac's list not mentioning a board means nothing. Only boards adopted
+    /// from the bridge can be updated by it, and only when the Mac's copy is
+    /// genuinely newer.
+    private func adoptBridgeBoards(_ incoming: [Dashboard]) {
+        var adopted = false
+        var changed = false
+
+        for board in incoming {
+            if let index = dashboards.firstIndex(where: { $0.id == board.id }) {
+                // Ours, or iCloud's. Either way the bridge doesn't get to
+                // rewrite it — only a board we took from the bridge in the
+                // first place.
+                guard bridgeAdoptedIDs.contains(board.id) else { continue }
+                guard board.modifiedAt > dashboards[index].modifiedAt else { continue }
+                guard board != dashboards[index] else { continue }
+                dashboards[index] = board
+                changed = true
+            } else {
+                // Already adopted but no longer present means the user deleted
+                // it here. Re-adding it on the Mac's next broadcast would make
+                // deletion impossible while the two are on the same network.
+                guard !bridgeAdoptedIDs.contains(board.id) else { continue }
+                dashboards.append(board)
+                bridgeAdoptedIDs.insert(board.id)
+                adopted = true
+                changed = true
+            }
+        }
+
+        if adopted {
+            SBStorage.write(Array(bridgeAdoptedIDs), to: bridgeAdoptedIDsURL)
+        }
+        guard changed else { return }
+
+        // A phone that had nothing but the starter board should land on a real
+        // one rather than leave the user to go find it.
+        let selectionExists = selectedDashboardID.map { id in
+            dashboards.contains { $0.id == id }
+        } ?? false
+        if !selectionExists {
+            selectedDashboardID = dashboards.first?.id
+        }
+        scheduleSave()
+    }
+
     // MARK: - Persistence
 
     private func didEdit(_ dashboard: Dashboard) {
@@ -516,6 +588,7 @@ public final class DashboardStore {
     private func load() {
         remoteKnownIDs = Set(SBStorage.read([UUID].self, from: remoteIDsURL) ?? [])
         bridgeKnownIDs = Set(SBStorage.read([UUID].self, from: bridgeIDsURL) ?? [])
+        bridgeAdoptedIDs = Set(SBStorage.read([UUID].self, from: bridgeAdoptedIDsURL) ?? [])
         var saved = SBStorage.read([Dashboard].self, from: fileURL) ?? []
 
         if !authorsBoards {
