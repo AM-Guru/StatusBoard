@@ -263,6 +263,9 @@ struct SplitRootView: View {
             }
         }
         ToolbarItem(placement: .automatic) {
+            CloudStatusMenu(model: model)
+        }
+        ToolbarItem(placement: .automatic) {
             BridgeStatusLabel(model: model)
         }
     }
@@ -393,6 +396,48 @@ struct BridgeStatusLabel: View {
             EmptyView()
         }
         #endif
+    }
+}
+
+/// iCloud state, and the button that retries it.
+///
+/// Apple TV had this from the start and the authoring platforms didn't, which
+/// made a sync failure here completely mute: `CloudSyncEngine` records exactly
+/// why nothing arrived in `statusDetail`, but nothing on iPhone, iPad or Mac
+/// ever read it, and `syncNow()` had no caller outside the TV menu. A phone
+/// showing the starter board could not say that it had never reached iCloud,
+/// and gave you no way to ask it to try again.
+struct CloudStatusMenu: View {
+    let model: AppModel
+    @State private var isChecking = false
+
+    private var symbol: String {
+        if isChecking { return "arrow.clockwise.icloud" }
+        return model.sync.isHealthy ? "checkmark.icloud" : "exclamationmark.icloud"
+    }
+
+    var body: some View {
+        Menu {
+            Section("iCloud") {
+                Text(model.sync.statusDetail)
+            }
+            Button {
+                guard !isChecking else { return }
+                isChecking = true
+                Task {
+                    await model.sync.syncNow()
+                    isChecking = false
+                }
+            } label: {
+                Label(isChecking ? "Checking…" : "Sync Now",
+                      systemImage: "arrow.clockwise")
+            }
+            .disabled(isChecking)
+        } label: {
+            Label("iCloud", systemImage: symbol)
+                .foregroundStyle(model.sync.isHealthy ? SBTheme.textSecondary : SBTheme.warn)
+        }
+        .help(model.sync.statusDetail)
     }
 }
 #endif
