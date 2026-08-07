@@ -21,7 +21,7 @@
 #
 # Optional:
 #   PLATFORMS     ios | macos | tvos | all      (default all)
-#   BUILD_NUMBER  CFBundleVersion               (default YYYYMMDDHHMM)
+#   BUILD_NUMBER  CFBundleVersion               (default YYMMDD.R)
 #   DO_UPLOAD     true to send builds to TestFlight
 
 set -euo pipefail
@@ -49,12 +49,6 @@ if [[ "${APP_STORE_DISTRIBUTION}" != Apple\ Distribution:*"(${APPLE_TEAM_ID})" ]
 fi
 
 PLATFORMS="${PLATFORMS:-all}"
-# YYMMDD.R, with R the next unused revision for today. Derived here rather
-# than in the workflow because it needs the App Store Connect key.
-if [[ -z "${BUILD_NUMBER:-}" ]]; then
-  export ASC_PRIVATE_KEY_PATH="${HOME}/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
-  BUILD_NUMBER="$(python3 Scripts/next-build-number.py)"
-fi
 DO_UPLOAD="${DO_UPLOAD:-false}"
 
 WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/statusboard-release.XXXXXX")"
@@ -128,10 +122,20 @@ if ! grep -q "BEGIN PRIVATE KEY" "${ASC_KEY_PATH}"; then
 fi
 echo "  ✓ App Store Connect key ${ASC_KEY_ID}"
 
+export ASC_PRIVATE_KEY_PATH="${ASC_KEY_PATH}"
+
+# YYMMDD.R, with R the next unused revision. Asking App Store Connect what has
+# already been uploaded needs the key, so this has to come after the key is on
+# disk — deriving it any earlier silently produced YYMMDD.1 on every run, and
+# the archive then died at upload against a number already used.
+if [[ -z "${BUILD_NUMBER:-}" ]]; then
+  BUILD_NUMBER="$(python3 Scripts/next-build-number.py)"
+fi
+echo "  ✓ build number ${BUILD_NUMBER}"
+
 # Every Release configuration signs manually, so all the App Store profiles
 # have to be on disk before xcodebuild runs. Fetched from App Store Connect
 # rather than carried as secrets, so a renewed profile needs no rotation here.
-export ASC_PRIVATE_KEY_PATH="${ASC_KEY_PATH}"
 if ! python3 Scripts/fetch-profiles.py; then
   echo "Could not install provisioning profiles." >&2
   exit 1

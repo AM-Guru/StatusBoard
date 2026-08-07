@@ -43,8 +43,16 @@ ssh media 'cd ~/actions-runner-statusboard && ./svc.sh status'
 
 Build numbers are **`YYMMDD.R`** — `260806.2` is the second build made on
 6 August 2026. `Scripts/next-build-number.py` picks `R` by asking App Store
-Connect what already exists for today, so CI, a laptop and a re-run never
-disagree.
+Connect what already exists, so CI, a laptop and a re-run never disagree. It
+answers with one more than the highest `YYMMDD.R` uploaded so far, which is
+today's date on any normal day — and stays ahead when a machine on a different
+timezone has already uploaded under tomorrow's date.
+
+It needs the App Store Connect key, so `ci-release.sh` derives the number only
+*after* staging the key, and the script fails rather than guessing if the API
+cannot be reached. An earlier version guessed `YYMMDD.1` and every CI run
+therefore archived for fifteen minutes before dying at upload on a number that
+was already taken.
 
 > `CFBundleVersion` is compared component by component and must increase within
 > a marketing version. `260806` is *lower* than the old timestamp style
@@ -273,7 +281,7 @@ Learned the hard way, one rejected upload at a time:
 2. Age rating and privacy policy URL are set (see below). Internal TestFlight
    testing works as soon as a build finishes processing.
 3. `CFBundleShortVersionString` comes from `MARKETING_VERSION` in
-   `project.yml`; the build number is generated as `YYYYMMDDHHMM` per run.
+   `project.yml`; the build number is generated as `YYMMDD.R` per run.
 
 ## Store metadata already configured
 
