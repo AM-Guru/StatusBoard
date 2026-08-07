@@ -1689,6 +1689,104 @@ struct WatchLayoutTests {
     }
 }
 
+/// How far down a board is worth drawing. The bug behind all of these: the
+/// canvas was the whole grid, so a board whose panels stopped halfway scrolled
+/// on for another screenful of nothing.
+@Suite struct BoardCanvasTests {
+    private let spacing: CGFloat = 10
+
+    private func panels(rows: Int, height: Int = 1) -> [Panel] {
+        (0..<rows).map { row in
+            Panel(kind: .clock, title: "Row \(row)",
+                  frame: GridRect(x: 0, y: row * height, width: 1, height: height))
+        }
+    }
+
+    private func canvas(_ device: SBDeviceClass, screenHeight: CGFloat,
+                        gridRows: Int, panels: [Panel],
+                        isEditing: Bool = false) -> SBBoardCanvas {
+        SBBoardCanvas(screenHeight: screenHeight, spacing: spacing,
+                      grid: BoardGrid(columns: 1, rows: gridRows),
+                      panels: panels, device: device, isEditing: isEditing)
+    }
+
+    /// Eight declared rows, two of them used: the board is two rows tall and a
+    /// window that fits them does not scroll at all.
+    @Test func emptyRowsBelowTheContentAreNotDrawn() {
+        let board = canvas(.mac, screenHeight: 400, gridRows: 8, panels: panels(rows: 2))
+        #expect(board.rowHeight == 140)                  // the Mac's readable minimum
+        #expect(board.contentHeight == 290)              // two rows, not eight
+        #expect(board.scrolls == false)
+        #expect(board.height == 400)                     // so the backdrop still fills the window
+    }
+
+    /// Cropping the canvas must not start hiding content: a board that really is
+    /// taller than the screen still scrolls, by exactly what it needs.
+    @Test func contentTallerThanTheScreenStillScrolls() {
+        let board = canvas(.phone, screenHeight: 700, gridRows: 8, panels: panels(rows: 8))
+        #expect(board.rowHeight == 150)                  // the iPhone's readable minimum
+        #expect(board.contentHeight == 1210)
+        #expect(board.scrolls)
+        #expect(board.height == board.contentHeight)
+    }
+
+    /// Arranging is the one time the empty rows matter — they are where a panel
+    /// is dragged to, so they stay reachable while edit mode is on.
+    @Test func arrangingKeepsTheWholeGridReachable() {
+        let arranging = canvas(.mac, screenHeight: 400, gridRows: 8,
+                               panels: panels(rows: 2), isEditing: true)
+        #expect(arranging.contentHeight == 1130)
+        #expect(arranging.scrolls)
+    }
+
+    /// Panels stretch to fill the grid, so the row stepper stays a size control:
+    /// cropping the canvas must not quietly resize anybody's panels.
+    @Test func croppingDoesNotChangeRowHeight() {
+        let tall = canvas(.mac, screenHeight: 900, gridRows: 6, panels: panels(rows: 3))
+        #expect(tall.rowHeight == (900.0 - 10) / 6)      // still one sixth of the window
+        #expect(tall.contentHeight == tall.rowHeight * 3 + 10)
+        #expect(tall.scrolls == false)
+    }
+
+    /// An empty board's message belongs centred on the screen, not on a taller
+    /// canvas behind it.
+    @Test func anEmptyBoardNeverScrolls() {
+        let board = canvas(.phone, screenHeight: 700, gridRows: 12, panels: [])
+        #expect(board.scrolls == false)
+        #expect(board.height == 700)
+    }
+
+    /// Nothing scrolls from the sofa or on a pair of lenses, so those screens
+    /// squeeze to fit as they always have.
+    @Test func displayOnlyScreensAlwaysFit() {
+        for device in [SBDeviceClass.tv, .glasses] {
+            let board = canvas(device, screenHeight: 720, gridRows: 4, panels: panels(rows: 4))
+            #expect(board.rowHeight == (720.0 - 10) / 4)
+            #expect(board.scrolls == false)
+            #expect(board.height == 720)
+        }
+    }
+
+    /// The everyday way a board grows empty rows: take the bottom panel off one
+    /// screen and its rows are left behind in that screen's grid.
+    @Test func hidingTheBottomPanelShortensTheBoard() {
+        var board = Dashboard(name: "Test", grid: BoardGrid(columns: 4, rows: 6))
+        board.panels = [
+            Panel(kind: .clock, title: "Clock", frame: GridRect(x: 0, y: 0, width: 4, height: 2)),
+            Panel(kind: .text, title: "Note", frame: GridRect(x: 0, y: 2, width: 4, height: 2)),
+        ]
+        board.setHidden(true, for: board.panels[1].id, on: .mac)
+
+        let grid = board.grid(for: .mac)
+        #expect(grid.rows == 6)                          // the empty rows are still declared
+        let drawn = SBBoardCanvas(screenHeight: 500, spacing: spacing, grid: grid,
+                                  panels: board.panels(for: .mac), device: .mac,
+                                  isEditing: false)
+        #expect(drawn.contentHeight == 290)              // but only the clock's two are drawn
+        #expect(drawn.scrolls == false)
+    }
+}
+
 @Suite @MainActor struct DisplayOnlyDeviceTests {
     /// A store standing in for an Apple TV or Watch: a screen that shows
     /// boards but never authors them.

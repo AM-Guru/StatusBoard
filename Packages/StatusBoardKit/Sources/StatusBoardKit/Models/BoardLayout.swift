@@ -489,6 +489,56 @@ public enum SBAutoLayout {
     }
 }
 
+// MARK: - Canvas
+
+/// How tall a board is drawn on one screen, and whether that screen has to
+/// scroll to see all of it.
+///
+/// Row height comes from the grid the board is arranged on, so the row count
+/// stays the size control the layout editor promises it is — fewer rows, bigger
+/// panels. The *canvas* stops at the last row anything occupies. A grid can
+/// declare more rows than its panels reach: hiding or deleting the bottom panel
+/// leaves its rows behind, the row stepper adds rows nobody has filled yet, and
+/// a screen following a taller screen's arrangement inherits its row count. Draw
+/// those empty rows and the board scrolls a long way past the end of its own
+/// content, with nothing down there to look at.
+///
+/// Free of any platform guard so it can be unit tested.
+public struct SBBoardCanvas: Equatable, Sendable {
+    /// The height of one grid row, in points.
+    public var rowHeight: CGFloat
+    /// The height the board's content actually needs, in points.
+    public var contentHeight: CGFloat
+    /// Whether the content is taller than the room this screen gives it.
+    public var scrolls: Bool
+    /// The height to draw the board at: its content when that scrolls, the
+    /// whole screen when it doesn't — so a backdrop still runs edge to edge.
+    public var height: CGFloat { scrolls ? contentHeight : screenHeight }
+
+    private var screenHeight: CGFloat
+
+    /// - Parameters:
+    ///   - screenHeight: the room the board has, inside its own padding.
+    ///   - isEditing: while arranging, the canvas keeps every declared row —
+    ///     the empty ones are where a panel is dragged to.
+    public init(screenHeight: CGFloat, spacing: CGFloat, grid: BoardGrid,
+                panels: [Panel], device: SBDeviceClass, isEditing: Bool) {
+        self.screenHeight = screenHeight
+        let rows = CGFloat(max(1, grid.rows))
+        let fitted = (screenHeight - spacing) / rows
+        // A row is never drawn shorter than the screen can read. When the board
+        // has more rows than that allows, it grows past the bottom of the screen
+        // and scrolls instead of squeezing every panel into an unreadable sliver.
+        rowHeight = device.allowsScrolling ? max(fitted, device.minimumRowHeight) : fitted
+        let filled = panels.map { $0.frame.y + $0.frame.height }.max() ?? 0
+        let drawn = isEditing ? max(1, grid.rows) : max(1, min(grid.rows, filled))
+        contentHeight = rowHeight * CGFloat(drawn) + spacing
+        // An empty board has nothing to scroll to; its message belongs centred
+        // on the screen, not on a taller canvas behind it.
+        scrolls = !panels.isEmpty && contentHeight > screenHeight + 0.5
+    }
+}
+
 // MARK: - Resolution
 
 extension Dashboard {

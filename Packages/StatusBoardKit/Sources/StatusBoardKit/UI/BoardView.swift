@@ -65,20 +65,15 @@ public struct BoardView: View {
                 let grid = board.grid(for: device)
                 let panels = board.panels(for: device)
                 let cellWidth = (proxy.size.width - spacing) / CGFloat(max(1, grid.columns))
-                let rows = CGFloat(max(1, grid.rows))
-                let fitted = (proxy.size.height - spacing) / rows
-                // A row is never drawn shorter than the screen can read. When
-                // the board has more rows than that allows, it grows past the
-                // bottom of the screen and scrolls instead of squeezing every
-                // panel into an unreadable sliver.
-                let cellHeight = device.allowsScrolling
-                    ? max(fitted, device.minimumRowHeight)
-                    : fitted
-                let contentHeight = cellHeight * rows + spacing
-                // An empty board has nothing to scroll to; its message belongs
-                // centred on the screen, not on a taller canvas behind it.
-                let scrolls = !panels.isEmpty && contentHeight > proxy.size.height + 0.5
-                let height = scrolls ? contentHeight : proxy.size.height
+                // Row height, and how far down the board is worth drawing: the
+                // canvas ends with the last row a panel occupies rather than
+                // with the grid, so nothing scrolls into empty rows.
+                let canvas = SBBoardCanvas(screenHeight: proxy.size.height, spacing: spacing,
+                                           grid: grid, panels: panels, device: device,
+                                           isEditing: isEditing)
+                let cellHeight = canvas.rowHeight
+                let scrolls = canvas.scrolls
+                let height = canvas.height
                 let content = ZStack(alignment: .topLeading) {
                     if isEditing {
                         gridGuides(grid: grid, cellWidth: cellWidth, cellHeight: cellHeight)
