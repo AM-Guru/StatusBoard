@@ -81,6 +81,15 @@ if [[ -n "${ASC_PRIVATE_KEY:-}" ]] && ! grep -q "BEGIN PRIVATE KEY" <<<"${ASC_PR
   fail "ASC_PRIVATE_KEY has no 'BEGIN PRIVATE KEY' line — it may have been truncated"
 fi
 
+# Optional, and a missing one is not a failure: without it the macOS leg is
+# skipped and iOS and tvOS still ship. Say so, because a silently skipped
+# platform is easy to stop noticing.
+if [[ -n "${APP_STORE_INSTALLER_P12_BASE64:-}" ]]; then
+  pass "APP_STORE_INSTALLER_P12_BASE64 is set — macOS will build"
+else
+  echo "  · APP_STORE_INSTALLER_P12_BASE64 is not set — macOS will be skipped"
+fi
+
 if ((failures)); then
   echo
   echo "${failures} problem(s) found." >&2

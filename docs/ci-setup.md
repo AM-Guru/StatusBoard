@@ -113,17 +113,40 @@ are not secrets and a renewal needs no rotation. It signs its own ES256 JWT with
 
 macOS **archives** correctly, but a Mac App Store `.pkg` is signed by a
 **Mac Installer Distribution** certificate — a different certificate from the
-`Apple Distribution` one that signs the app, and the team does not have it:
+`Apple Distribution` one that signs the app:
 
 ```
 error: exportArchive No signing certificate "Mac Installer Distribution" found
 ```
 
-`release.sh` checks for it and skips macOS with an explanation rather than
-failing the whole release, so iOS and tvOS still ship. To enable macOS: create a
-**Mac Installer Distribution** certificate at
-<https://developer.apple.com/account/resources/certificates>, then make it
-available to the CI keychain the same way the distribution `.p12` is.
+> **The name in the keychain is not the name in the portal.** App Store Connect
+> calls the type `MAC_INSTALLER_DISTRIBUTION` and labels it "Mac Installer
+> Distribution", but the certificate it issues has the common name
+> **`3rd Party Mac Developer Installer: <team> (<TEAMID>)`**, and that is the
+> only name `security find-identity` will ever print. Matching on Apple's label
+> finds nothing even when the certificate is correctly installed — which is how
+> macOS stayed skipped after the certificate existed.
+
+The certificate does not need the web UI. It is `certificateType`
+`MAC_INSTALLER_DISTRIBUTION` on `POST /v1/certificates`, taking a CSR that
+`openssl req` can produce, so the same API key that fetches profiles can issue
+it:
+
+```bash
+openssl req -new -newkey rsa:2048 -nodes -keyout installer.key -out installer.csr \
+  -subj "/emailAddress=i@am.guru/CN=AM Guru, LLC/C=US"
+```
+
+Post `installer.csr` as `csrContent`, base64-decode `certificateContent` from
+the reply into `installer.cer`, and pack the two into a `.p12`. On CI that
+`.p12` is the `APP_STORE_INSTALLER_P12_BASE64` secret; it is imported into the
+same ephemeral keychain as the distribution certificate and unlocked for
+`productbuild`/`productsign` as well as `codesign`.
+
+The secret is **optional**. Without it `release.sh` skips macOS with an
+explanation rather than failing the whole release, so iOS and tvOS still ship —
+and `validate-release-configuration.sh` prints a line saying macOS will be
+skipped, so it does not go unnoticed.
 
 ## Still required before CI can cut a release
 
@@ -147,6 +170,7 @@ available to the CI keychain the same way the distribution `.p12` is.
 | `ASC_ISSUER_ID` | Issuer ID from the same file |
 | `ASC_PRIVATE_KEY` | Full contents of `AuthKey_<KEY_ID>.p8`, including the BEGIN/END lines |
 | `DEVELOPMENT_TEAM` | Your 10-character Apple team id |
+| `APP_STORE_INSTALLER_P12_BASE64` | Optional. Base64 of the `3rd Party Mac Developer Installer` `.p12`; unlocks the macOS leg. Uses `APP_STORE_DISTRIBUTION_P12_PASSWORD` — it is deliberately not a second password |
 
 The workflow writes the key to `~/.appstoreconnect/private_keys/` for the build
 and deletes it again in an `always()` step, so it never lingers on the runner.

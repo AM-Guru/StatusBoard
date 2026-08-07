@@ -55,6 +55,7 @@ WORK_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/statusboard-release.XXXXXX")"
 KEYCHAIN_PATH="${WORK_DIR}/statusboard-signing.keychain-db"
 KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
 P12_PATH="${WORK_DIR}/distribution.p12"
+INSTALLER_P12_PATH="${WORK_DIR}/installer.p12"
 ASC_KEY_DIR="${HOME}/.appstoreconnect/private_keys"
 ASC_KEY_PATH="${ASC_KEY_DIR}/AuthKey_${ASC_KEY_ID}.p8"
 ORIGINAL_KEYCHAINS=()
@@ -94,9 +95,25 @@ security import "${P12_PATH}" \
   -P "${APP_STORE_DISTRIBUTION_P12_PASSWORD}" \
   -T /usr/bin/codesign \
   -T /usr/bin/security
+
+# A Mac App Store .pkg is signed by a second, separate certificate — "3rd Party
+# Mac Developer Installer". Optional: without it the macOS leg is skipped and
+# iOS and tvOS still ship, which is what happened for every build before this
+# secret existed. Same password as the distribution .p12, deliberately.
+if [[ -n "${APP_STORE_INSTALLER_P12_BASE64:-}" ]]; then
+  printf '%s' "${APP_STORE_INSTALLER_P12_BASE64}" | /usr/bin/base64 -D > "${INSTALLER_P12_PATH}"
+  chmod 600 "${INSTALLER_P12_PATH}"
+  security import "${INSTALLER_P12_PATH}" \
+    -k "${KEYCHAIN_PATH}" \
+    -P "${APP_STORE_DISTRIBUTION_P12_PASSWORD}" \
+    -T /usr/bin/productbuild \
+    -T /usr/bin/productsign \
+    -T /usr/bin/security
+fi
+
 # Without this, codesign prompts for keychain access and hangs a headless build.
 security set-key-partition-list \
-  -S apple-tool:,apple:,codesign: \
+  -S apple-tool:,apple:,codesign:,productbuild:,productsign: \
   -s -k "${KEYCHAIN_PASSWORD}" \
   "${KEYCHAIN_PATH}" >/dev/null
 # The ephemeral keychain goes first, but the original list has to stay: the
@@ -112,6 +129,19 @@ if ! security find-identity -v -p codesigning "${KEYCHAIN_PATH}" \
   exit 1
 fi
 echo "  ✓ ${APP_STORE_DISTRIBUTION}"
+
+# The installer certificate is not a codesigning identity, so it never shows up
+# under `-p codesigning`; `-p basic` is the one that lists it.
+if [[ -n "${APP_STORE_INSTALLER_P12_BASE64:-}" ]]; then
+  INSTALLER_IDENTITY="$(security find-identity -p basic -v "${KEYCHAIN_PATH}" \
+    | sed -n 's/.*"\(3rd Party Mac Developer Installer[^"]*\)".*/\1/p' | head -1)"
+  if [[ -z "${INSTALLER_IDENTITY}" ]]; then
+    echo "APP_STORE_INSTALLER_P12_BASE64 holds no '3rd Party Mac Developer Installer' identity." >&2
+    security find-identity -p basic -v "${KEYCHAIN_PATH}" >&2
+    exit 1
+  fi
+  echo "  ✓ ${INSTALLER_IDENTITY}"
+fi
 
 mkdir -p "${ASC_KEY_DIR}"
 printf '%s' "${ASC_PRIVATE_KEY}" > "${ASC_KEY_PATH}"

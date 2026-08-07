@@ -133,14 +133,20 @@ MACOS_PROFILES='  <dict>
     <key>guru.am.StatusBoard.widgets</key><string>Status Board macOS Widgets App Store</string>
   </dict>' 
 
-make_export_plist() {           # make_export_plist <path> <method> <destination> [profiles-dict]
-  local profiles="${4:-}"
+make_export_plist() {           # make_export_plist <path> <method> <destination> [profiles-dict] [installer-cert]
+  local profiles="${4:-}" installer="${5:-}"
   local signing_block="  <key>signingStyle</key><string>automatic</string>"
   if [[ -n "$profiles" ]]; then
     signing_block="  <key>signingStyle</key><string>manual</string>
   <key>signingCertificate</key><string>Apple Distribution</string>
   <key>provisioningProfiles</key>
 $profiles"
+  fi
+  # Manual signing means Xcode will not go looking for the installer identity
+  # on its own, so the macOS leg has to name it. Only the .pkg export has one.
+  if [[ -n "$installer" ]]; then
+    signing_block="$signing_block
+  <key>installerSigningCertificate</key><string>$installer</string>"
   fi
   cat > "$1" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -165,11 +171,11 @@ wants() {                       # wants <platform>
   [[ "$PLATFORMS" == "all" || "$PLATFORMS" == "both" || "$PLATFORMS" == "$1" ]]
 }
 
-ship() {                        # ship <scheme> <destination> <slug> <altool type> <ext> [profiles-dict]
-  local scheme="$1" destination="$2" slug="$3" type="$4" ext="$5" manual_profile="${6:-}"
+ship() {                        # ship <scheme> <destination> <slug> <altool type> <ext> [profiles-dict] [installer-cert]
+  local scheme="$1" destination="$2" slug="$3" type="$4" ext="$5" manual_profile="${6:-}" installer="${7:-}"
   local archive_path="$ARTIFACTS/$scheme.xcarchive"
   archive "$scheme" "$destination" "$archive_path"
-  make_export_plist "$ARTIFACTS/ExportOptions-$slug.plist" "app-store-connect" "export" "$manual_profile"
+  make_export_plist "$ARTIFACTS/ExportOptions-$slug.plist" "app-store-connect" "export" "$manual_profile" "$installer"
   export_archive "$archive_path" "$ARTIFACTS/ExportOptions-$slug.plist" "$ARTIFACTS/$slug"
   local product
   product="$(find "$ARTIFACTS/$slug" -maxdepth 1 -name "*.$ext" | head -1)"
@@ -192,19 +198,27 @@ if [[ "$PLATFORMS" == "both" ]]; then
 fi
 
 wants ios   && ship "StatusBoard-iOS"   "generic/platform=iOS"   ios   ios   ipa "$IOS_PROFILES"
-# A Mac App Store .pkg is signed by a "Mac Installer Distribution"
-# certificate, which is a different certificate from the one that signs the
-# app. Without it exportArchive fails after a full archive, so check first and
-# say plainly why macOS was left out rather than failing the whole release.
+# A Mac App Store .pkg is signed by a second certificate, separate from the one
+# that signs the app. App Store Connect calls it "Mac Installer Distribution";
+# the certificate itself is issued with the common name "3rd Party Mac Developer
+# Installer", and that is the only name the keychain knows it by — matching on
+# Apple's label instead finds nothing even when the certificate is installed.
+# Without it exportArchive fails after a full archive, so check first and say
+# plainly why macOS was left out rather than failing the whole release.
 if wants macos; then
-  if security find-identity -p basic -v 2>/dev/null | grep -q "Mac Installer Distribution"; then
-    ship "StatusBoard-macOS" "generic/platform=macOS" macos macos pkg "$MACOS_PROFILES"
+  MACOS_INSTALLER_IDENTITY="$(security find-identity -p basic -v 2>/dev/null \
+    | sed -n 's/.*"\(3rd Party Mac Developer Installer[^"]*\)".*/\1/p' | head -1)"
+  if [[ -n "$MACOS_INSTALLER_IDENTITY" ]]; then
+    echo "▸ macOS installer identity: $MACOS_INSTALLER_IDENTITY"
+    ship "StatusBoard-macOS" "generic/platform=macOS" macos macos pkg "$MACOS_PROFILES" \
+         "$MACOS_INSTALLER_IDENTITY"
   else
     echo "▸ SKIPPING macOS"
-    echo "  No 'Mac Installer Distribution' certificate for team $DEVELOPMENT_TEAM."
+    echo "  No '3rd Party Mac Developer Installer' certificate for team $DEVELOPMENT_TEAM."
     echo "  The app signs fine; the installer package cannot be signed without it."
     echo "  Create one at https://developer.apple.com/account/resources/certificates"
-    echo "  (Mac Installer Distribution), then add it to the CI keychain."
+    echo "  (Mac Installer Distribution), then add it to the keychain — on CI, as"
+    echo "  the APP_STORE_INSTALLER_P12_BASE64 secret."
     SKIPPED_MACOS=1
   fi
 fi
