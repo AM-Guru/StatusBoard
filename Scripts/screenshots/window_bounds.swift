@@ -10,7 +10,12 @@
 import CoreGraphics
 import Foundation
 
+// An optional pid narrows the match to one process. That matters here: the
+// release app and the development build share a bundle id *and* a display
+// name, so matching on the name alone can hand back somebody's real
+// dashboards instead of the demo boards we just seeded.
 let wanted = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "Status Board"
+let wantedPID = CommandLine.arguments.count > 2 ? Int(CommandLine.arguments[2]) : nil
 
 guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                kCGNullWindowID) as? [[String: Any]] else {
@@ -29,6 +34,7 @@ var found: [Found] = []
 for window in windows {
     let owner = window[kCGWindowOwnerName as String] as? String ?? ""
     guard owner == wanted else { continue }
+    if let wantedPID, (window[kCGWindowOwnerPID as String] as? Int) != wantedPID { continue }
     guard let bounds = window[kCGWindowBounds as String] as? [String: Any],
           let x = bounds["X"] as? Double, let y = bounds["Y"] as? Double,
           let w = bounds["Width"] as? Double, let h = bounds["Height"] as? Double,

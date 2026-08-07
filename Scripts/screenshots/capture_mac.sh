@@ -35,11 +35,20 @@ for boardName in "${BOARDS[@]}"; do
     open -n "$APP"
     sleep 9
 
-    # 1440x900 points is the window the app opens at, which is exactly the
-    # 2880x1800 App Store canvas once Retina doubles it.
-    win="$(swift "$HERE/window_bounds.swift" "Status Board" | awk -F'\t' '$4==1440 {print $1; exit}')"
+    # Match on the pid we just launched, not the app name: a released copy in
+    # /Applications shares this build's bundle id and display name, and
+    # capturing that one would put real dashboards in a store screenshot.
+    pid="$(pgrep -n -f "$APP/Contents/MacOS" || true)"
+    if [ -z "$pid" ]; then
+        echo "the dev build did not start for $boardName" >&2
+        continue
+    fi
+    # Largest window wins, and no size is pinned: the window frame is autosaved
+    # per bundle id, so this opens at whatever the last copy was left at. The
+    # composer scales the capture into a fixed-width bezel regardless.
+    win="$(swift "$HERE/window_bounds.swift" "Status Board" "$pid" | head -1 | cut -f1)"
     if [ -z "$win" ]; then
-        echo "could not find the 1440x900 window for $boardName" >&2
+        echo "no window on screen for $boardName" >&2
         continue
     fi
     screencapture -x -o -l"$win" "$OUT/mac-board-$slug.png"
