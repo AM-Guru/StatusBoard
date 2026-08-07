@@ -198,9 +198,55 @@ The same script CI uses, straight from your Mac or over SSH:
 ssh media 'cd ~/Repo/StatusBoard && ./Scripts/release.sh --upload'
 ```
 
-It reads credentials from the environment, falling back to
-`~/Repo/appstoreconnect/.env`, so a local run usually needs no arguments.
 Add nothing and it archives without uploading — useful for a smoke test.
+
+## Where the App Store Connect credentials come from
+
+`Scripts/asc-credentials.sh` resolves them for both `release.sh` and the Python
+scripts, first hit wins per value:
+
+1. the environment — `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PATH`
+2. `$ASC_ENV_FILE`, default `~/Repo/appstoreconnect/.env`
+3. the **login keychain**, service `Status Board: App Store Connect`
+4. `~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8`
+
+Wherever the `.p8` is found it is copied into `~/.appstoreconnect/private_keys`,
+because that is the only place `xcodebuild` reads it from (see the gotcha below).
+
+The keychain is the one worth using on a personal machine — it survives a fresh
+checkout without leaving the issuer id in a dotfile:
+
+```bash
+Scripts/asc-credentials.sh save --key-id ABC1234567 --issuer-id 11111111-2222-3333-4444-555555555555 --private-key ~/Downloads/AuthKey_ABC1234567.p8
+```
+
+The key material is stored **base64-encoded**: `security find-generic-password -w`
+hex-dumps any value containing a newline, and a PEM is nothing but newlines, so
+storing it raw round-trips as an unusable hex string. After saving, the
+downloaded `.p8` can be deleted — the resolver writes it back out at `0600` when
+a build needs it.
+
+`Scripts/asc-credentials.sh show` prints where each value was found without
+printing any of them; `where` prints the issuing page.
+
+### When they are missing
+
+Every entry point prints the page that issues them rather than a bare
+"ASC_KEY_ID is required":
+
+<https://appstoreconnect.apple.com/access/integrations/api>
+(**Users and Access ▸ Integrations ▸ App Store Connect API**)
+
+- **Issuer ID** — at the top of that page, one per team.
+- **Key ID** — the column beside each key.
+- **The `.p8`** — offered for download *only* at the moment the key is created.
+  Apple never shows it again, so there is nothing to read back out of the web UI
+  and no way to recover a lost key; revoke it and generate a new one instead.
+  Creating a key needs the Account Holder or Admin role.
+
+That last point is why the scripts read the keychain but do not try to sign in
+and scrape: the two identifiers are on the page, but the one value that actually
+matters is not, and never will be.
 
 ## App Store Connect
 
@@ -297,6 +343,28 @@ Learned the hard way, one rejected upload at a time:
 | `LSApplicationCategoryType` | macOS | required for Mac App Store bundles |
 | `ITSAppUsesNonExemptEncryption: false` | iOS, macOS | otherwise builds park in "Missing Compliance" and cannot reach testers |
 | tvOS Brand Assets | tvOS | Apple TV needs layered `.imagestack` icons plus top-shelf art; the back layer and top shelf must be **fully opaque** |
+
+## A sandboxed Mac app needs the entitlement *and* the usage string
+
+Usage strings alone do nothing on macOS. `NSCalendarsFullAccessUsageDescription`
+was set, but the sandbox had no
+`com.apple.security.personal-information.calendars`, so EventKit never got as far
+as a permission dialog — the sandbox refused the XPC connection to the calendar
+daemon and every call failed with:
+
+```
+The operation couldn't be completed. (Mach error 4099 - unknown error code)
+```
+
+4099 is `MACH_SEND_INVALID_DEST`: a send to a port that was never allowed to
+exist. Nothing about it mentions calendars or privacy, and resetting the app's
+privacy settings does not help, because no permission was ever requested.
+`CalendarSource` now translates an `NSMachErrorDomain` failure into a sentence
+that names the cause, so if this ever regresses the panel says so.
+
+Location was already correct here — same rule, quieter failure — and the widget
+extensions need nothing, since they render stored snapshots and never call
+EventKit themselves.
 
 ## Before the first upload
 

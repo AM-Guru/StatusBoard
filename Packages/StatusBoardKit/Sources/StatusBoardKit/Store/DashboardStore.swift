@@ -15,6 +15,28 @@ public final class DashboardStore {
 
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private let fileURL: URL
+    /// Boards this device has actually seen in iCloud. Only meaningful on the
+    /// display-only platforms, where it's what separates a real board from a
+    /// leftover local one.
+    @ObservationIgnored private let remoteIDsURL: URL
+    @ObservationIgnored private var remoteKnownIDs: Set<UUID> = []
+
+    /// Whether this device can create and edit boards at all.
+    ///
+    /// Apple TV and the Watch are displays: every board is built on a Mac,
+    /// iPad or iPhone and arrives over iCloud. They must not invent a starter
+    /// board of their own — that puts a board on screen that exists on none of
+    /// the user's other devices (and an older build then uploaded it to
+    /// iCloud, where it doesn't belong either).
+    @ObservationIgnored public let authorsBoards: Bool
+
+    nonisolated public static var platformAuthorsBoards: Bool {
+        #if os(tvOS) || os(watchOS)
+        return false
+        #else
+        return true
+        #endif
+    }
 
     // MARK: - Undo
 
@@ -84,9 +106,13 @@ public final class DashboardStore {
         scheduleSave()
     }
 
-    public init(fileURL: URL? = nil) {
-        self.fileURL = fileURL
+    public init(fileURL: URL? = nil, authorsBoards: Bool = DashboardStore.platformAuthorsBoards) {
+        let url = fileURL
             ?? SBStorage.localSupportURL().appendingPathComponent("dashboards.json")
+        self.fileURL = url
+        self.authorsBoards = authorsBoards
+        self.remoteIDsURL = url.deletingLastPathComponent()
+            .appendingPathComponent("icloud-boards.json")
         load()
     }
 
@@ -146,11 +172,94 @@ public final class DashboardStore {
     public func addPanel(kind: PanelKind, to dashboardID: Dashboard.ID) -> Panel? {
         guard var board = dashboard(id: dashboardID) else { return nil }
         let size = kind.defaultSize
+        var settings = PanelSettings()
+        settings.refreshSeconds = kind.defaultRefreshSeconds
         let panel = Panel(kind: kind, title: kind.displayName,
-                          frame: board.makeRoom(width: size.width, height: size.height))
+                          frame: board.makeRoom(width: size.width, height: size.height),
+                          settings: settings)
         board.panels.append(panel)
         update(board, undoActionName: "Add \(kind.displayName)")
         return panel
+    }
+
+    /// Pushes one set of Canvas credentials onto every Canvas panel, on every
+    /// board.
+    ///
+    /// Grades, Assignments, and Canvas panels all authenticate against the
+    /// same school with the same token, so entering it in one signs in all of
+    /// them — and rotating it no longer leaves the others silently broken.
+    /// The panel that supplied the credentials is excluded; it already has
+    /// them, and its own edit is what is being saved.
+    @discardableResult
+    public func applyCanvasCredentials(host: String?, token: String?,
+                                       excluding panelID: Panel.ID? = nil) -> Int {
+        var pending: [(index: Int, board: Dashboard)] = []
+        var updated = 0
+        for (boardIndex, original) in dashboards.enumerated() {
+            var board = original
+            var changed = false
+            for (panelIndex, panel) in board.panels.enumerated()
+            where panel.kind.usesCanvasCredentials && panel.id != panelID {
+                var connector = panel.settings.connector ?? ConnectorConfig()
+                guard connector.projectURL != host || connector.token != token else { continue }
+                connector.projectURL = host
+                connector.token = token
+                board.panels[panelIndex].settings.connector = connector
+                changed = true
+                updated += 1
+            }
+            guard changed else { continue }
+            board.modifiedAt = Date()
+            pending.append((boardIndex, board))
+        }
+        guard !pending.isEmpty else { return 0 }
+
+        // One undo entry for the whole sweep — it was a single user action.
+        recordUndo("Update Canvas Sign-In")
+        for entry in pending {
+            dashboards[entry.index] = entry.board
+            didEdit(entry.board)
+        }
+        return updated
+    }
+
+    /// Pushes one Tessie API key onto every Tesla panel, on every board.
+    ///
+    /// One key covers a whole Tessie account, so a board built from a battery
+    /// panel, a map panel and a security panel would otherwise need the same
+    /// token pasted three times — and rotating it would break whichever ones
+    /// were forgotten. The VIN is deliberately left alone: panels for two
+    /// different cars share the key but not the car.
+    @discardableResult
+    public func applyTessieCredentials(apiKey: String?,
+                                       excluding panelID: Panel.ID? = nil) -> Int {
+        var pending: [(index: Int, board: Dashboard)] = []
+        var updated = 0
+        for (boardIndex, original) in dashboards.enumerated() {
+            var board = original
+            var changed = false
+            for (panelIndex, panel) in board.panels.enumerated()
+            where panel.kind.usesTessieCredentials && panel.id != panelID {
+                var connector = panel.settings.connector ?? ConnectorConfig()
+                guard connector.token != apiKey else { continue }
+                connector.token = apiKey
+                board.panels[panelIndex].settings.connector = connector
+                changed = true
+                updated += 1
+            }
+            guard changed else { continue }
+            board.modifiedAt = Date()
+            pending.append((boardIndex, board))
+        }
+        guard !pending.isEmpty else { return 0 }
+
+        // One undo entry for the whole sweep — it was a single user action.
+        recordUndo("Update Tessie API Key")
+        for entry in pending {
+            dashboards[entry.index] = entry.board
+            didEdit(entry.board)
+        }
+        return updated
     }
 
     /// Copies a panel into the same board, placed in the first free slot.
@@ -252,17 +361,29 @@ public final class DashboardStore {
     /// Applies a dashboard that arrived from iCloud. Last-writer-wins on
     /// `modifiedAt`; does not re-trigger sync.
     public func applyRemote(_ dashboard: Dashboard) {
+        rememberRemote(dashboard.id)
         if let index = dashboards.firstIndex(where: { $0.id == dashboard.id }) {
             guard dashboard.modifiedAt >= dashboards[index].modifiedAt else { return }
             dashboards[index] = dashboard
         } else {
             dashboards.append(dashboard)
         }
+        // A display-only device starts with nothing on screen, so the first
+        // board to arrive is the one to show.
+        let selectionExists = selectedDashboardID.map { id in
+            dashboards.contains { $0.id == id }
+        } ?? false
+        if !selectionExists {
+            selectedDashboardID = dashboards.first?.id
+        }
         scheduleSave()
     }
 
     public func applyRemoteDeletion(id: Dashboard.ID) {
         dashboards.removeAll { $0.id == id }
+        if remoteKnownIDs.remove(id) != nil {
+            SBStorage.write(Array(remoteKnownIDs), to: remoteIDsURL)
+        }
         if selectedDashboardID == id { selectedDashboardID = dashboards.first?.id }
         scheduleSave()
     }
@@ -275,12 +396,28 @@ public final class DashboardStore {
     }
 
     private func load() {
-        if let saved = SBStorage.read([Dashboard].self, from: fileURL), !saved.isEmpty {
-            dashboards = saved
-        } else {
-            dashboards = [.starter()]
+        remoteKnownIDs = Set(SBStorage.read([UUID].self, from: remoteIDsURL) ?? [])
+        var saved = SBStorage.read([Dashboard].self, from: fileURL) ?? []
+
+        if !authorsBoards {
+            // On a display-only device the local file is nothing but a cache of
+            // what iCloud sent, so anything iCloud never sent is a leftover —
+            // in practice the starter board an older build made here, which is
+            // why the TV could sit on a board that was on no other device.
+            // Dropped locally only: this never deletes anything from iCloud.
+            saved = saved.filter { remoteKnownIDs.contains($0.id) }
         }
+
+        if saved.isEmpty && authorsBoards {
+            saved = [.starter()]
+        }
+        dashboards = saved
         selectedDashboardID = dashboards.first?.id
+    }
+
+    private func rememberRemote(_ id: Dashboard.ID) {
+        guard remoteKnownIDs.insert(id).inserted else { return }
+        SBStorage.write(Array(remoteKnownIDs), to: remoteIDsURL)
     }
 
     private func scheduleSave() {

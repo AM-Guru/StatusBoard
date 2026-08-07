@@ -25,6 +25,7 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
     case grades
     case schedule
     case assignments
+    case tessie
 
     public var id: String { rawValue }
 
@@ -54,6 +55,7 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .grades: return "Grades"
         case .schedule: return "Schedule"
         case .assignments: return "Assignments"
+        case .tessie: return "Tesla (Tessie)"
         }
     }
 
@@ -83,6 +85,7 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .grades: return "chart.bar.doc.horizontal"
         case .schedule: return "calendar.day.timeline.left"
         case .assignments: return "checklist"
+        case .tessie: return "car.side.fill"
         }
     }
 
@@ -94,6 +97,7 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .github, .appStoreConnect, .supabase, .logs, .canvas: return (4, 2)
         case .k12schedule: return (3, 2)
         case .grades, .schedule, .assignments: return (4, 2)
+        case .tessie: return (4, 3)
         case .health: return (2, 1)
         case .text, .status, .mcp, .bridge: return (2, 1)
         }
@@ -105,12 +109,35 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
         case .weather, .graph, .progress, .feed, .calendar, .table,
              .status, .mcp, .webClip, .image,
              .github, .appStoreConnect, .supabase, .logs, .health, .canvas,
-             .k12schedule, .grades, .schedule, .assignments:
+             .k12schedule, .grades, .schedule, .assignments, .tessie:
             return true
         case .clock, .countdown, .text, .bridge:
             return false
         }
     }
+
+    /// A car's state changes by the minute while it is moving, so five is far
+    /// too coarse. Tessie answers from its own cache, so this doesn't keep the
+    /// vehicle awake.
+    public var defaultRefreshSeconds: Double {
+        switch self {
+        case .tessie: return 60
+        default: return 300
+        }
+    }
+
+    /// Whether the panel authenticates against Canvas / Instructure with the
+    /// shared address and access token. See `CanvasCredentials`.
+    public var usesCanvasCredentials: Bool {
+        switch self {
+        case .canvas, .grades, .assignments: return true
+        default: return false
+        }
+    }
+
+    /// Whether the panel authenticates against Tessie with the shared API key.
+    /// See `TessieCredentials`.
+    public var usesTessieCredentials: Bool { self == .tessie }
 }
 
 public struct Panel: Identifiable, Codable, Hashable, Sendable {
@@ -215,6 +242,30 @@ public enum HealthMetric: String, Codable, CaseIterable, Sendable {
     }
 }
 
+/// One RSS/Atom feed inside a news panel. A panel may merge several, in which
+/// case their items are interleaved newest-first.
+public struct FeedSource: Codable, Hashable, Sendable, Identifiable {
+    public var id: UUID
+    /// Optional label shown beside this feed's items. Empty means "use the
+    /// name the feed gives itself", falling back to its host.
+    public var name: String
+    public var url: String
+    /// Off keeps the feed configured but out of the merge — handy for muting
+    /// a noisy source without losing its URL.
+    public var isEnabled: Bool
+
+    public init(id: UUID = UUID(), name: String = "", url: String = "", isEnabled: Bool = true) {
+        self.id = id
+        self.name = name
+        self.url = url
+        self.isEnabled = isEnabled
+    }
+
+    public var trimmedURL: String {
+        url.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 /// How list-like panels (feed, calendar) present items.
 public enum ListDisplayMode: String, Codable, CaseIterable, Sendable {
     case list
@@ -272,9 +323,27 @@ public struct PanelSettings: Codable, Hashable, Sendable {
     public var showsSeconds: Bool = true
 
     // Weather
+    /// Resolved coordinates. Always filled in for a working panel, whatever
+    /// way the location was chosen — a place search, a station lookup and
+    /// Current Location all write their answer back here, so a panel keeps
+    /// showing weather even when the network or the device's location is
+    /// unavailable on a later refresh.
     public var latitude: Double?
     public var longitude: Double?
     public var locationName: String?
+    /// How the location above was chosen.
+    public var weatherLocationMode: WeatherLocationMode = .coordinates
+    /// A city, postal code or street address, for `.place`.
+    public var weatherPlaceQuery: String?
+    /// Observation station identifier, for `.station` (e.g. "KSFO").
+    public var weatherStationID: String?
+    public var weatherStationNetwork: WeatherStationNetwork = .nws
+    /// Base URL of a personal weather station's JSON endpoint, for `.personal`.
+    public var weatherPersonalURL: String?
+    public var weatherPersonalFormat: PersonalWeatherFormat = .automatic
+    /// Dot paths into a custom PWS payload, keyed by `PersonalWeatherField`.
+    public var weatherPersonalPaths: [String: String] = [:]
+    public var weatherUnits: WeatherUnits = .automatic
 
     // Calendar
     public var calendarDaysAhead: Int = 7
@@ -286,8 +355,62 @@ public struct PanelSettings: Codable, Hashable, Sendable {
     /// "AP US History A (Sem 1)" → "History".
     public var courseAliases: [String: String] = [:]
 
+    /// Courses the user has unchecked, keyed by the school's course name.
+    /// Schools enroll students in shells like "Counselor" or "INDLS" that carry
+    /// no real grade, and they'd otherwise sit at the top of the panel as a
+    /// permanent "—". Hiding is a display choice, so the fetched data keeps
+    /// them and the editor can still list them to be brought back.
+    public var hiddenCourses: Set<String> = []
+
+    /// The grades a panel should actually draw, in the order given.
+    public func visibleGrades(_ grades: [CourseGrade]) -> [CourseGrade] {
+        guard !hiddenCourses.isEmpty else { return grades }
+        return grades.filter { !hiddenCourses.contains($0.course) }
+    }
+
+    // Tessie (Tesla)
+    /// What the panel shows while the car is parked, in order. The first
+    /// field with data becomes the headline; the rest become tiles.
+    public var tessieParkedFields: [TessieField] = TessieField.defaultParked
+    /// The same, for while it is driving.
+    public var tessieDrivingFields: [TessieField] = TessieField.defaultDriving
+    /// Swap layouts on their own as the car's gear changes.
+    public var tessieAutoContext: Bool = true
+    /// Which layout to show when `tessieAutoContext` is off — and, when it is
+    /// on, which one to fall back to before any data has arrived.
+    public var tessieContext: TessieContext = .parked
+
     // Feed / calendar presentation
     public var listDisplay: ListDisplayMode = .list
+
+    // Feed
+    /// Every feed the panel merges. Empty on panels saved before multi-feed
+    /// support — `activeFeedSources` falls back to the legacy single `url`.
+    public var feedSources: [FeedSource] = []
+    /// Show each item's site favicon so merged sources stay distinguishable.
+    public var feedShowsSourceIcons: Bool = true
+    /// Show the source's name under each headline. Off by default on a single
+    /// feed, where every row would repeat the same word.
+    public var feedShowsSourceNames: Bool = true
+
+    /// The feeds a news panel should actually fetch, oldest settings included:
+    /// a panel saved before multi-feed support carries one URL in `url`.
+    public var activeFeedSources: [FeedSource] {
+        let configured = feedSources.filter { $0.isEnabled && !$0.trimmedURL.isEmpty }
+        if !configured.isEmpty { return configured }
+        let legacy = (url ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !legacy.isEmpty else { return [] }
+        return [FeedSource(url: legacy)]
+    }
+
+    /// Moves a legacy single-URL feed panel into `feedSources` so the editor
+    /// has a row to show. Safe to call repeatedly.
+    public mutating func migrateFeedSourcesIfNeeded() {
+        guard feedSources.isEmpty else { return }
+        let legacy = (url ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !legacy.isEmpty else { return }
+        feedSources = [FeedSource(url: legacy)]
+    }
 
     // Countdown
     public var targetDate: Date?
@@ -315,6 +438,8 @@ public struct PanelSettings: Codable, Hashable, Sendable {
     // Appearance
     /// Per-panel accent override as "#RRGGBB"; nil uses the theme amber.
     public var accentColorHex: String?
+    /// Theme, background, transparency, blur and dynamic-styling options.
+    public var appearance = PanelAppearance()
 
     // Alerts — local notification when the panel's value crosses a limit.
     public var alertAbove: Double?
@@ -331,11 +456,16 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         case imageFilter
         case timeZoneID, showsSeconds
         case latitude, longitude, locationName
-        case calendarDaysAhead, listDisplay, healthMetric, courseAliases
+        case calendarDaysAhead, listDisplay, healthMetric, courseAliases, hiddenCourses
+        case feedSources, feedShowsSourceIcons, feedShowsSourceNames
+        case tessieParkedFields, tessieDrivingFields, tessieAutoContext, tessieContext
         case targetDate, text
         case tableHasHeader, tableZebra, tableStatusColoring
         case statusTargets, bridgeKey, mcp, connector
-        case accentColorHex, alertAbove, alertBelow
+        case accentColorHex, appearance, alertAbove, alertBelow
+        case weatherLocationMode, weatherPlaceQuery, weatherStationID
+        case weatherStationNetwork, weatherPersonalURL, weatherPersonalFormat
+        case weatherPersonalPaths, weatherUnits
     }
 
     public init(from decoder: Decoder) throws {
@@ -365,7 +495,22 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         calendarDaysAhead = try container.decodeIfPresent(Int.self, forKey: .calendarDaysAhead) ?? 7
         healthMetric = (try? container.decodeIfPresent(HealthMetric.self, forKey: .healthMetric)) ?? .steps
         courseAliases = try container.decodeIfPresent([String: String].self, forKey: .courseAliases) ?? [:]
+        hiddenCourses = try container.decodeIfPresent(Set<String>.self, forKey: .hiddenCourses) ?? []
+        // Decoded through raw strings so a field this build doesn't know is
+        // dropped on its own, keeping the rest of the user's choices. As
+        // `[TessieField]`, one unrecognised name would throw away the whole
+        // list and silently reset the panel to defaults.
+        tessieParkedFields = try container.decodeIfPresent([String].self, forKey: .tessieParkedFields)
+            .map { $0.compactMap(TessieField.init(rawValue:)) } ?? TessieField.defaultParked
+        tessieDrivingFields = try container.decodeIfPresent([String].self, forKey: .tessieDrivingFields)
+            .map { $0.compactMap(TessieField.init(rawValue:)) } ?? TessieField.defaultDriving
+        tessieAutoContext = try container.decodeIfPresent(Bool.self, forKey: .tessieAutoContext) ?? true
+        tessieContext = (try? container.decodeIfPresent(TessieContext.self, forKey: .tessieContext))
+            .flatMap { $0 } ?? .parked
         listDisplay = (try? container.decodeIfPresent(ListDisplayMode.self, forKey: .listDisplay)) ?? .list
+        feedSources = try container.decodeIfPresent([FeedSource].self, forKey: .feedSources) ?? []
+        feedShowsSourceIcons = try container.decodeIfPresent(Bool.self, forKey: .feedShowsSourceIcons) ?? true
+        feedShowsSourceNames = try container.decodeIfPresent(Bool.self, forKey: .feedShowsSourceNames) ?? true
         targetDate = try container.decodeIfPresent(Date.self, forKey: .targetDate)
         text = try container.decodeIfPresent(String.self, forKey: .text)
         tableHasHeader = try container.decodeIfPresent(Bool.self, forKey: .tableHasHeader) ?? true
@@ -376,8 +521,22 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         mcp = try container.decodeIfPresent(MCPPanelConfig.self, forKey: .mcp)
         connector = try container.decodeIfPresent(ConnectorConfig.self, forKey: .connector)
         accentColorHex = try container.decodeIfPresent(String.self, forKey: .accentColorHex)
+        appearance = try container.decodeIfPresent(PanelAppearance.self, forKey: .appearance)
+            ?? PanelAppearance()
         alertAbove = try container.decodeIfPresent(Double.self, forKey: .alertAbove)
         alertBelow = try container.decodeIfPresent(Double.self, forKey: .alertBelow)
+        weatherLocationMode = (try? container.decodeIfPresent(WeatherLocationMode.self,
+                                                             forKey: .weatherLocationMode)) ?? .coordinates
+        weatherPlaceQuery = try container.decodeIfPresent(String.self, forKey: .weatherPlaceQuery)
+        weatherStationID = try container.decodeIfPresent(String.self, forKey: .weatherStationID)
+        weatherStationNetwork = (try? container.decodeIfPresent(WeatherStationNetwork.self,
+                                                               forKey: .weatherStationNetwork)) ?? .nws
+        weatherPersonalURL = try container.decodeIfPresent(String.self, forKey: .weatherPersonalURL)
+        weatherPersonalFormat = (try? container.decodeIfPresent(PersonalWeatherFormat.self,
+                                                               forKey: .weatherPersonalFormat)) ?? .automatic
+        weatherPersonalPaths = try container.decodeIfPresent([String: String].self,
+                                                             forKey: .weatherPersonalPaths) ?? [:]
+        weatherUnits = (try? container.decodeIfPresent(WeatherUnits.self, forKey: .weatherUnits)) ?? .automatic
     }
 }
 

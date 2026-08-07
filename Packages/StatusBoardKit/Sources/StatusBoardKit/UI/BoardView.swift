@@ -23,7 +23,18 @@ public struct BoardView: View {
     @State private var resizingPanelID: Panel.ID?
     @State private var resizeDelta: CGSize = .zero
 
-    private let spacing: CGFloat = 10
+    /// Gaps between panels. The board's appearance can open this up, which
+    /// suits a wallpaper showing through — so it is read per board rather than
+    /// being the fixed 10pt it used to be.
+    private var spacing: CGFloat {
+        CGFloat(model.store.dashboard(id: dashboardID)?.appearance.panelSpacing ?? 10)
+    }
+
+    /// Drags are measured against the board, which never moves. A panel's own
+    /// coordinate space travels with it, so once the panel starts snapping in
+    /// whole cells the jump lands back in the next event's translation and the
+    /// panel oscillates between two positions on alternating frames.
+    private static let boardSpace = "sb.board"
 
     public init(model: AppModel, dashboardID: Dashboard.ID,
                 layoutTarget: SBDeviceClass? = nil, isPreview: Bool = false,
@@ -41,6 +52,7 @@ public struct BoardView: View {
     private var isEditing: Bool { editingOverride ?? model.isEditing }
 
     public var body: some View {
+        let boardAppearance = model.store.dashboard(id: dashboardID)?.appearance ?? BoardAppearance()
         GeometryReader { proxy in
             if let board = model.store.dashboard(id: dashboardID) {
                 let grid = board.grid(for: device)
@@ -53,17 +65,26 @@ public struct BoardView: View {
                     }
                     ForEach(panels) { panel in
                         panelCell(panel, board: board, grid: grid,
-                                  cellWidth: cellWidth, cellHeight: cellHeight)
+                                  cellWidth: cellWidth, cellHeight: cellHeight,
+                                  boardSize: proxy.size)
                     }
                     if panels.isEmpty {
                         emptyState(boardHasPanels: !board.panels.isEmpty)
                             .frame(width: proxy.size.width, height: proxy.size.height)
                     }
                 }
+                .coordinateSpace(.named(Self.boardSpace))
             }
         }
         .padding(spacing)
-        .background(SBTheme.background.ignoresSafeArea())
+        .background {
+            // Behind the padding too, so a wallpaper runs to the edges of the
+            // screen rather than stopping at the panel margin.
+            GeometryReader { proxy in
+                SBBoardBackdropView(appearance: boardAppearance, size: proxy.size)
+            }
+            .ignoresSafeArea()
+        }
     }
 
     // MARK: - Empty state
@@ -128,7 +149,8 @@ public struct BoardView: View {
 
     @ViewBuilder
     private func panelCell(_ panel: Panel, board: Dashboard, grid: BoardGrid,
-                           cellWidth: CGFloat, cellHeight: CGFloat) -> some View {
+                           cellWidth: CGFloat, cellHeight: CGFloat,
+                           boardSize: CGSize) -> some View {
         let frame = panel.frame
         let width = CGFloat(frame.width) * cellWidth - spacing
         let height = CGFloat(frame.height) * cellHeight - spacing
@@ -136,8 +158,19 @@ public struct BoardView: View {
                              y: CGFloat(frame.y) * cellHeight + spacing)
         let isDragging = draggingPanelID == panel.id
         let isResizing = resizingPanelID == panel.id
+        // Where this panel sits on the board, so a panel masking the board's
+        // backdrop lines up with its neighbours. The board's own padding is
+        // added back because the backdrop is drawn behind it.
+        let backdrop = SBBoardBackdrop(
+            appearance: board.appearance,
+            boardSize: CGSize(width: boardSize.width + spacing * 2,
+                              height: boardSize.height + spacing * 2),
+            panelOrigin: CGPoint(x: origin.x + spacing, y: origin.y + spacing))
 
-        PanelView(panel: panel, record: model.snapshots.record(for: panel.snapshotKey))
+        PanelView(panel: panel,
+                  record: model.snapshots.record(for: panel.snapshotKey),
+                  boardAppearance: board.appearance)
+            .environment(\.sbBoardBackdrop, backdrop)
             .frame(width: max(40, width + (isResizing ? resizeDelta.width : 0)),
                    height: max(40, height + (isResizing ? resizeDelta.height : 0)))
             #if !os(tvOS) && !os(watchOS)
@@ -268,41 +301,81 @@ public struct BoardView: View {
     // MARK: - Gestures
 
     #if !os(tvOS) && !os(watchOS)
+    /// Where a move would land, in whole grid cells. The live preview and the
+    /// commit both come from this, so the two can never disagree.
+    private func movedFrame(_ translation: CGSize, from frame: GridRect,
+                            grid: BoardGrid,
+                            cellWidth: CGFloat, cellHeight: CGFloat) -> GridRect {
+        var moved = frame
+        moved.x += Int((translation.width / cellWidth).rounded())
+        moved.y += Int((translation.height / cellHeight).rounded())
+        return moved.clamped(to: grid)
+    }
+
+    /// Where a resize would land. The origin is pinned — dragging the handle
+    /// changes the panel's size, never its top-left corner — so the preview,
+    /// which only grows the frame, matches what gets committed.
+    private func resizedFrame(_ translation: CGSize, from frame: GridRect,
+                              grid: BoardGrid,
+                              cellWidth: CGFloat, cellHeight: CGFloat) -> GridRect {
+        var resized = frame
+        resized.width = min(max(1, frame.width + Int((translation.width / cellWidth).rounded())),
+                            max(1, grid.columns - frame.x))
+        resized.height = min(max(1, frame.height + Int((translation.height / cellHeight).rounded())),
+                             max(1, grid.rows - frame.y))
+        return resized
+    }
+
+    // Both gestures preview in whole cells rather than following the pointer
+    // freely, and that is not just cosmetic. The store update and the @State
+    // reset land in *different* SwiftUI transactions, so there is one frame
+    // where the panel renders at its newly committed origin with the old drag
+    // offset still applied — it visibly jumps past the drop point and snaps
+    // back. Previewing the frame that is about to be committed makes those two
+    // positions numerically identical, so that frame draws in the right place
+    // whichever update SwiftUI processes first.
+
     private func moveGesture(_ panel: Panel, grid: BoardGrid,
                              cellWidth: CGFloat, cellHeight: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 4)
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.boardSpace))
             .onChanged { value in
+                let target = movedFrame(value.translation, from: panel.frame, grid: grid,
+                                        cellWidth: cellWidth, cellHeight: cellHeight)
                 draggingPanelID = panel.id
-                dragOffset = value.translation
+                dragOffset = CGSize(
+                    width: CGFloat(target.x - panel.frame.x) * cellWidth,
+                    height: CGFloat(target.y - panel.frame.y) * cellHeight)
             }
             .onEnded { value in
                 defer {
                     draggingPanelID = nil
                     dragOffset = .zero
                 }
-                var frame = panel.frame
-                frame.x += Int((value.translation.width / cellWidth).rounded())
-                frame.y += Int((value.translation.height / cellHeight).rounded())
-                commit(frame.clamped(to: grid), for: panel)
+                commit(movedFrame(value.translation, from: panel.frame, grid: grid,
+                                  cellWidth: cellWidth, cellHeight: cellHeight),
+                       for: panel)
             }
     }
 
     private func resizeGesture(_ panel: Panel, grid: BoardGrid,
                                cellWidth: CGFloat, cellHeight: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 2)
+        DragGesture(minimumDistance: 2, coordinateSpace: .named(Self.boardSpace))
             .onChanged { value in
+                let target = resizedFrame(value.translation, from: panel.frame, grid: grid,
+                                          cellWidth: cellWidth, cellHeight: cellHeight)
                 resizingPanelID = panel.id
-                resizeDelta = value.translation
+                resizeDelta = CGSize(
+                    width: CGFloat(target.width - panel.frame.width) * cellWidth,
+                    height: CGFloat(target.height - panel.frame.height) * cellHeight)
             }
             .onEnded { value in
                 defer {
                     resizingPanelID = nil
                     resizeDelta = .zero
                 }
-                var frame = panel.frame
-                frame.width = max(1, frame.width + Int((value.translation.width / cellWidth).rounded()))
-                frame.height = max(1, frame.height + Int((value.translation.height / cellHeight).rounded()))
-                commit(frame.clamped(to: grid), for: panel)
+                commit(resizedFrame(value.translation, from: panel.frame, grid: grid,
+                                    cellWidth: cellWidth, cellHeight: cellHeight),
+                       for: panel)
             }
     }
 

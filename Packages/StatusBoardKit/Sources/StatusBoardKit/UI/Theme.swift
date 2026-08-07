@@ -47,3 +47,16 @@ extension ServiceStatus.State {
         }
     }
 }
+
+extension ServiceStatus.State {
+    /// The panel-aware variant: semantic colors darken on a light theme, so a
+    /// green dot on Paper is still a green dot and not a pale smudge.
+    public func color(in style: SBPanelStyle) -> Color {
+        switch self {
+        case .up: return style.good
+        case .degraded: return style.warn
+        case .down: return style.bad
+        case .unknown: return style.textSecondary
+        }
+    }
+}

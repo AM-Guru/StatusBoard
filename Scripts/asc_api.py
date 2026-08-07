@@ -28,13 +28,67 @@ def _der_to_raw(der: bytes, size: int = 32) -> bytes:
     return out
 
 
+KEYCHAIN_SERVICE = os.environ.get("ASC_KEYCHAIN_SERVICE",
+                                  "Status Board: App Store Connect")
+KEY_DIR = os.path.expanduser(
+    os.environ.get("ASC_KEY_DIR", "~/.appstoreconnect/private_keys"))
+ISSUING_PAGE = "https://appstoreconnect.apple.com/access/integrations/api"
+
+MISSING = f"""App Store Connect credentials not found.
+
+Looked in the environment (ASC_KEY_ID, ASC_ISSUER_ID, ASC_PRIVATE_KEY_PATH),
+the login keychain (service "{KEYCHAIN_SERVICE}") and {KEY_DIR}.
+
+Issue or look up a key at App Store Connect — Users and Access > Integrations >
+App Store Connect API:
+
+    {ISSUING_PAGE}
+
+The issuer id is at the top of that page and the key id beside each key. The
+.p8 downloads only when the key is created and cannot be recovered afterwards.
+
+Store them once with:
+
+    Scripts/asc-credentials.sh save --key-id … --issuer-id … --private-key …
+"""
+
+
+def _keychain(account):
+    """Reads one generic-password item, or None when it is not there."""
+    try:
+        result = subprocess.run(
+            ["security", "find-generic-password",
+             "-s", KEYCHAIN_SERVICE, "-a", account, "-w"],
+            capture_output=True, text=True)
+    except OSError:
+        return None
+    return result.stdout.strip() or None if result.returncode == 0 else None
+
+
 def credentials():
-    key_id = os.environ.get("ASC_KEY_ID")
-    issuer = os.environ.get("ASC_ISSUER_ID")
-    key_path = os.environ.get("ASC_PRIVATE_KEY_PATH") or os.path.expanduser(
-        f"~/.appstoreconnect/private_keys/AuthKey_{key_id}.p8")
-    if not (key_id and issuer and os.path.exists(key_path)):
-        raise SystemExit("ASC_KEY_ID, ASC_ISSUER_ID and the .p8 key are required")
+    key_id = os.environ.get("ASC_KEY_ID") or _keychain("key-id")
+    issuer = os.environ.get("ASC_ISSUER_ID") or _keychain("issuer-id")
+    if not (key_id and issuer):
+        raise SystemExit(MISSING)
+
+    key_path = os.environ.get("ASC_PRIVATE_KEY_PATH")
+    key_path = os.path.expanduser(key_path) if key_path else None
+    if not (key_path and os.path.exists(key_path)):
+        key_path = os.path.join(KEY_DIR, f"AuthKey_{key_id}.p8")
+    # The key can live only in the keychain — Scripts/asc-credentials.sh save
+    # puts it there so the downloaded copy can be deleted. openssl needs a
+    # file, so write it back out where xcodebuild also expects to find it.
+    if not os.path.exists(key_path):
+        # Stored base64: `security find-generic-password -w` hex-dumps any
+        # value containing a newline, and a PEM is nothing but newlines.
+        encoded = _keychain("private-key")
+        if not encoded:
+            raise SystemExit(MISSING)
+        os.makedirs(KEY_DIR, exist_ok=True)
+        key_path = os.path.join(KEY_DIR, f"AuthKey_{key_id}.p8")
+        with open(os.open(key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
+                  "wb") as handle:
+            handle.write(base64.b64decode(encoded))
     return key_id, issuer, key_path
 
 

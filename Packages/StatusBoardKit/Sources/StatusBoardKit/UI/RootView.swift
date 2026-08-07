@@ -45,6 +45,7 @@ public struct RootView: View {
 struct SplitRootView: View {
     @Bindable var model: AppModel
     @State private var renamingBoard: Dashboard?
+    @State private var showsBoardAppearance = false
     @State private var renameText = ""
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
@@ -61,6 +62,11 @@ struct SplitRootView: View {
                 PanelInspectorView(model: model,
                                    panel: inspected.panel,
                                    dashboardID: inspected.dashboardID)
+            }
+        }
+        .sheet(isPresented: $showsBoardAppearance) {
+            if let board = model.store.selectedDashboard {
+                BoardAppearanceView(model: model, dashboardID: board.id)
             }
         }
         .sheet(isPresented: $model.showsDeviceSimulator) {
@@ -119,6 +125,11 @@ struct SplitRootView: View {
                         } label: {
                             Label("World Clocks", systemImage: "globe")
                         }
+                        Button {
+                            model.store.add(.glassGallery())
+                        } label: {
+                            Label("Glass", systemImage: "square.on.square.dashed")
+                        }
                     }
                 } label: {
                     Label("New Dashboard", systemImage: "plus")
@@ -173,6 +184,14 @@ struct SplitRootView: View {
             } label: {
                 Label("Add Panel", systemImage: "plus.rectangle.on.rectangle")
             }
+        }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                showsBoardAppearance = true
+            } label: {
+                Label("Board Appearance", systemImage: "paintpalette")
+            }
+            .help("Theme, wallpaper and spacing for this board")
         }
         ToolbarItem(placement: .primaryAction) {
             Button {

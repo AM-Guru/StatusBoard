@@ -2,6 +2,7 @@ import SwiftUI
 
 /// The classic Status Board clock: big LCD digits, live seconds.
 struct ClockPanelContent: View {
+    @Environment(\.sbStyle) private var sbStyle
     let settings: PanelSettings
 
     @Environment(\.panelAccent) private var accent
@@ -22,7 +23,7 @@ struct ClockPanelContent: View {
                         .contentTransition(.numericText())
                     Text(dateString(context.date))
                         .font(SBTheme.titleFont(size: min(proxy.size.height * 0.14, 15)))
-                        .foregroundStyle(SBTheme.textSecondary)
+                        .foregroundStyle(sbStyle.textSecondary)
                         .kerning(1.2)
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
@@ -52,6 +53,7 @@ struct ClockPanelContent: View {
 
 /// Days / hours / minutes / seconds until a target date.
 struct CountdownPanelContent: View {
+    @Environment(\.sbStyle) private var sbStyle
     let settings: PanelSettings
 
     @Environment(\.panelAccent) private var accent
@@ -86,7 +88,7 @@ struct CountdownPanelContent: View {
                 .lineLimit(1)
             Text(label)
                 .font(SBTheme.titleFont(size: min(proxy.size.height * 0.12, 12)))
-                .foregroundStyle(SBTheme.textSecondary)
+                .foregroundStyle(sbStyle.textSecondary)
                 .kerning(1.5)
         }
         .frame(maxWidth: .infinity)
@@ -95,6 +97,7 @@ struct CountdownPanelContent: View {
 
 /// Static text panel.
 struct TextPanelContent: View {
+    @Environment(\.sbStyle) private var sbStyle
     let settings: PanelSettings
 
     var body: some View {
@@ -102,7 +105,7 @@ struct TextPanelContent: View {
             Text(settings.text ?? "Edit this panel to set its text")
                 .font(.system(size: min(proxy.size.height * 0.25, 22),
                               weight: .medium, design: .rounded))
-                .foregroundStyle(settings.text == nil ? SBTheme.textSecondary : SBTheme.textPrimary)
+                .foregroundStyle(settings.text == nil ? sbStyle.textSecondary : sbStyle.textPrimary)
                 .minimumScaleFactor(0.4)
                 .multilineTextAlignment(.leading)
                 .frame(width: proxy.size.width, height: proxy.size.height, alignment: .leading)

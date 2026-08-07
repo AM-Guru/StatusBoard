@@ -23,6 +23,7 @@ public final class CloudSyncEngine: NSObject {
 
     @ObservationIgnored private let store: DashboardStore
     @ObservationIgnored private var engine: CKSyncEngine?
+    @ObservationIgnored private var startTask: Task<Void, Never>?
     @ObservationIgnored private let zoneID = CKRecordZone.ID(zoneName: "StatusBoards")
     @ObservationIgnored private let stateURL: URL
 
@@ -44,30 +45,71 @@ public final class CloudSyncEngine: NSObject {
     }
 
     public func start() {
-        guard engine == nil else { return }
+        guard engine == nil, startTask == nil else { return }
         guard Self.processHasCloudKitEntitlement() else {
-            state = .unavailable("Build is not signed with iCloud entitlements; sync is off")
-            return
-        }
-        guard FileManager.default.ubiquityIdentityToken != nil else {
-            state = .unavailable("Sign in to iCloud to sync dashboards")
+            state = .unavailable(Self.unentitledReason)
             return
         }
         let container = CKContainer(identifier: SBIdentifiers.cloudContainer)
+        startTask = Task { @MainActor [weak self] in
+            defer { self?.startTask = nil }
+            // Ask CloudKit itself whether there's an account. The obvious
+            // alternative, `FileManager.ubiquityIdentityToken`, reports the
+            // iCloud *Drive* identity — which Apple TV doesn't have at all, so
+            // it reads nil on a perfectly well signed-in Apple TV and sync
+            // would never start there.
+            do {
+                let status = try await container.accountStatus()
+                guard status == .available else {
+                    self?.state = .unavailable(Self.describe(status))
+                    return
+                }
+            } catch {
+                self?.state = .unavailable("Could not reach iCloud: \(error.localizedDescription)")
+                return
+            }
+            self?.startEngine(container: container)
+        }
+    }
+
+    private func startEngine(container: CKContainer) {
+        guard engine == nil else { return }
         var configuration = CKSyncEngine.Configuration(
             database: container.privateCloudDatabase,
             stateSerialization: loadStateSerialization(),
             delegate: self)
         configuration.automaticallySync = true
-        engine = CKSyncEngine(configuration)
-        engine?.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: zoneID))])
-        // Push everything we have locally; CloudKit dedupes by record change tag.
+        let engine = CKSyncEngine(configuration)
+        self.engine = engine
+        state = .idle
+        engine.state.add(pendingDatabaseChanges: [.saveZone(CKRecordZone(zoneID: zoneID))])
+        // Push what we have locally; CloudKit dedupes by record change tag.
+        // Display-only devices have nothing of their own to contribute — their
+        // copies are a cache of iCloud, so pushing them back can only conflict.
+        guard store.authorsBoards else { return }
         for dashboard in store.dashboards {
             enqueueSave(dashboard.id)
         }
     }
 
+    private static func describe(_ status: CKAccountStatus) -> String {
+        switch status {
+        case .noAccount: return "Sign in to iCloud to sync dashboards"
+        case .restricted: return "iCloud is restricted on this device"
+        case .couldNotDetermine: return "Could not check your iCloud account"
+        case .temporarilyUnavailable: return "iCloud is temporarily unavailable"
+        default: return "iCloud is unavailable"
+        }
+    }
+
     public func syncNow() async {
+        // The engine may never have started — no account at launch, no network,
+        // signed in afterwards. This is the button the user reaches for when
+        // boards haven't arrived, so retry from the top rather than do nothing.
+        if engine == nil {
+            start()
+            await startTask?.value
+        }
         guard let engine else { return }
         state = .syncing
         defer {
@@ -78,18 +120,32 @@ public final class CloudSyncEngine: NSObject {
         try? await engine.sendChanges()
     }
 
-    /// CKContainer raises an uncatchable NSException when the process lacks
-    /// iCloud entitlements (common in unsigned development builds), so check
-    /// before touching CloudKit.
+    /// CKContainer raises an uncatchable NSException — the process dies on the
+    /// spot, it cannot be caught — when the container isn't in the running
+    /// process's entitlements. So never construct one without checking first.
     private static func processHasCloudKitEntitlement() -> Bool {
         #if os(macOS)
         guard let task = SecTaskCreateFromSelf(nil) else { return false }
         let value = SecTaskCopyValueForEntitlement(
             task, "com.apple.developer.icloud-services" as CFString, nil)
         return value != nil
+        #elseif targetEnvironment(simulator)
+        // Simulator builds are frequently unsigned (any `CODE_SIGNING_ALLOWED=NO`
+        // build is), and an unsigned process carries no iCloud container, so
+        // CKContainer would take the app down at launch.
+        return false
         #else
-        // iOS/tvOS builds run through Xcode always embed the entitlements file.
+        // Device builds are always signed, and the entitlements file lists the
+        // container for every target.
         return true
+        #endif
+    }
+
+    private static var unentitledReason: String {
+        #if targetEnvironment(simulator)
+        return "iCloud sync is off in the Simulator; boards sync on a real device"
+        #else
+        return "Build is not signed with iCloud entitlements; sync is off"
         #endif
     }
 
@@ -150,6 +206,9 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
             switch change.changeType {
             case .signOut, .switchAccounts:
                 state = .unavailable("iCloud account changed")
+            case .signIn:
+                state = .idle
+                start()
             default:
                 state = .idle
             }

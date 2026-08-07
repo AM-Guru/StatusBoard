@@ -31,41 +31,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Credentials ───────────────────────────────────────────────────────────
-ENV_FILE="${ASC_ENV_FILE:-$HOME/Repo/appstoreconnect/.env}"
-if [[ -z "${ASC_KEY_ID:-}" && -f "$ENV_FILE" ]]; then
-  # Parsed rather than sourced: values may contain spaces without quoting,
-  # which `source` would try to execute. Only the keys we need are read.
-  while IFS='=' read -r key value; do
-    key="${key#"${key%%[![:space:]]*}"}"          # trim leading space
-    [[ "$key" =~ ^(ASC_KEY_ID|ASC_ISSUER_ID|ASC_PRIVATE_KEY_PATH|DEVELOPMENT_TEAM)$ ]] || continue
-    value="${value%\"}"; value="${value#\"}"
-    value="${value%\'}"; value="${value#\'}"
-    [[ -z "${!key:-}" ]] && export "$key=$value"
-  done < "$ENV_FILE"
-fi
-: "${ASC_KEY_ID:?ASC_KEY_ID is required}"
-: "${ASC_ISSUER_ID:?ASC_ISSUER_ID is required}"
-
-# xcodebuild only authenticates against the developer portal reliably when the
-# key sits in the well-known directory and is referenced by id — passing
-# -authenticationKeyPath instead fails with "Authentication failed: Make sure a
-# bearer token was provided". So the key is copied there and the path flag is
-# never used.
-KEY_NAME="AuthKey_${ASC_KEY_ID}.p8"
-KEY_DIR="$HOME/.appstoreconnect/private_keys"
-KEY_FOUND=""
-for dir in "$KEY_DIR" "$HOME/private_keys" "$HOME/Repo/appstoreconnect/private_keys"; do
-  [[ -f "$dir/$KEY_NAME" ]] && KEY_FOUND="$dir/$KEY_NAME" && break
-done
-if [[ -z "$KEY_FOUND" && -n "${ASC_PRIVATE_KEY_PATH:-}" && -f "${ASC_PRIVATE_KEY_PATH/#\~/$HOME}" ]]; then
-  KEY_FOUND="${ASC_PRIVATE_KEY_PATH/#\~/$HOME}"
-fi
-[[ -n "$KEY_FOUND" ]] || { echo "Could not find $KEY_NAME" >&2; exit 1; }
-if [[ "$KEY_FOUND" != "$KEY_DIR/$KEY_NAME" ]]; then
-  mkdir -p "$KEY_DIR"
-  cp "$KEY_FOUND" "$KEY_DIR/$KEY_NAME"
-  chmod 600 "$KEY_DIR/$KEY_NAME"
-fi
+# Environment, then ~/Repo/appstoreconnect/.env, then the login keychain. The
+# resolver also copies the .p8 into ~/.appstoreconnect/private_keys, which is
+# the only place xcodebuild reliably reads it from, and prints the page that
+# issues these values when it comes up empty.
+source "$REPO_ROOT/Scripts/asc-credentials.sh"
+asc_resolve_credentials || { asc_credentials_help; exit 1; }
 
 # project.yml already carries the team, so a local run needs no extra setup.
 if [[ -z "${DEVELOPMENT_TEAM:-}" ]]; then
@@ -83,6 +54,9 @@ echo "  build number : $BUILD_NUMBER"
 echo "  platforms    : $PLATFORMS"
 echo "  upload       : $([[ $DO_UPLOAD == 1 ]] && echo yes || echo no)"
 echo "  team         : $DEVELOPMENT_TEAM"
+# Which source won matters when a run authenticates as the wrong team; the ids
+# themselves stay out of the log.
+echo "  credentials  : key id from ${ASC_KEY_ID_ORIGIN:-unknown}, .p8 from ${ASC_PRIVATE_KEY_ORIGIN:-unknown}"
 
 command -v xcodegen >/dev/null || { echo "xcodegen not installed (brew install xcodegen)" >&2; exit 1; }
 xcodegen generate

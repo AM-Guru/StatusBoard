@@ -29,12 +29,16 @@ public final class K12Session {
 
     public private(set) var state: State = .signedOut
 
-    private let storage = HTTPCookieStorage()
+    /// Cookies are held and sent by hand — see `SessionCookieJar` for why the
+    /// obvious `HTTPCookieStorage()` cannot be used.
+    private var jar = SessionCookieJar()
     private lazy var session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = storage
-        configuration.httpCookieAcceptPolicy = .always
-        configuration.httpShouldSetCookies = true
+        // We attach `Cookie:` ourselves, so URLSession must not manage cookies
+        // — and must never fall back to the process-wide shared storage.
+        configuration.httpCookieStorage = nil
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpShouldSetCookies = false
         configuration.timeoutIntervalForRequest = 30
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: configuration)
@@ -52,64 +56,53 @@ public final class K12Session {
 
     private func loadCookies() {
         guard let data = KeychainBlobStore.load(account: Self.keychainAccount),
-              let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+              let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else {
             return
         }
-        var restored = 0
-        for entry in raw {
-            var properties: [HTTPCookiePropertyKey: Any] = [:]
-            for (key, value) in entry {
-                properties[HTTPCookiePropertyKey(key)] = value
-            }
-            if let cookie = HTTPCookie(properties: properties) {
-                storage.setCookie(cookie)
-                restored += 1
-            }
-        }
-        if restored > 0 { state = .signedIn }
+        jar = SessionCookieJar.restored(from: raw)
+        if !jar.isEmpty { state = .signedIn }
     }
 
     private func saveCookies() {
-        let cookies = storage.cookies ?? []
-        let raw: [[String: Any]] = cookies.compactMap { cookie in
-            guard let properties = cookie.properties else { return nil }
-            var entry: [String: Any] = [:]
-            for (key, value) in properties {
-                // Dates and strings survive JSON; anything else is derivable.
-                if let date = value as? Date {
-                    entry[key.rawValue] = ISO8601DateFormatter().string(from: date)
-                } else if JSONSerialization.isValidJSONObject([value]) {
-                    entry[key.rawValue] = value
-                } else {
-                    entry[key.rawValue] = String(describing: value)
-                }
-            }
-            return entry
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: raw) else { return }
+        guard let data = try? JSONSerialization.data(withJSONObject: jar.persistable) else { return }
         KeychainBlobStore.save(data, account: Self.keychainAccount)
     }
 
     public func signOut() {
-        for cookie in storage.cookies ?? [] { storage.deleteCookie(cookie) }
+        jar.removeAll()
         KeychainBlobStore.delete(account: Self.keychainAccount)
         state = .signedOut
+    }
+
+    /// Cookie names and count — enough to tell "nothing was captured" from
+    /// "captured, but the portal still said no". Values are never included.
+    public var diagnosticSummary: String {
+        jar.isEmpty
+            ? "no session cookies were captured from the web view"
+            : "\(jar.cookies.count) session cookie(s): \(jar.names.joined(separator: ", "))"
     }
 
     // MARK: - Adopting a signed-in web session
 
     #if canImport(WebKit) && !os(tvOS) && !os(watchOS)
     /// Copies cookies out of a web view that has completed sign-in.
-    public func adoptCookies(from dataStore: WKWebsiteDataStore) async {
-        let cookies = await dataStore.httpCookieStore.allCookies()
-        var adopted = 0
-        for cookie in cookies where cookie.domain.contains("k12.com") {
-            storage.setCookie(cookie)
-            adopted += 1
+    ///
+    /// Scoped to the portal's own registrable domain rather than a hardcoded
+    /// `k12.com`, so a school on its own Canvas host works too — and so the
+    /// rest of the browser's cookies are left where they are.
+    @discardableResult
+    public func adoptCookies(from dataStore: WKWebsiteDataStore,
+                             portal: String = K12Session.defaultPortal) async -> Int {
+        let scope = SessionCookieJar.registrableDomain(of: portal)
+        let relevant = await dataStore.httpCookieStore.allCookies().filter {
+            SessionCookieJar.domainMatches(host: scope, cookieDomain: $0.domain)
+                || SessionCookieJar.domainMatches(host: $0.domain, cookieDomain: scope)
         }
-        guard adopted > 0 else { return }
+        jar.absorb(relevant)
+        guard !jar.isEmpty else { return 0 }
         saveCookies()
         state = .signedIn
+        return relevant.count
     }
     #endif
 
@@ -118,8 +111,8 @@ public final class K12Session {
     public var isSignedIn: Bool { state == .signedIn }
 
     /// Performs an OLS API call. Throws a clear, actionable error when the
-    /// session has lapsed — the portal answers expired sessions with its HTML
-    /// login page rather than a 401.
+    /// session has lapsed — the portal answers those with `401` and a JSON
+    /// body, so the status code is the signal, not the content type.
     public func json(path: String, portal: String = K12Session.defaultPortal) async throws -> JSONValue {
         var base = portal.trimmingCharacters(in: .whitespaces)
         if !base.contains("://") { base = "https://" + base }
@@ -132,22 +125,37 @@ public final class K12Session {
         }
 
         var request = URLRequest(url: url)
+        request.httpShouldHandleCookies = false
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(base, forHTTPHeaderField: "Referer")
+        if let cookieHeader = jar.header(for: url) {
+            request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        }
         let (data, response) = try await session.data(for: request)
 
         if let http = response as? HTTPURLResponse {
+            // Keep any refreshed session cookie the call handed back.
+            if let fields = http.allHeaderFields as? [String: String], let final = http.url,
+               jar.absorb(HTTPCookie.cookies(withResponseHeaderFields: fields, for: final)) {
+                saveCookies()
+            }
             let contentType = (http.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
-            if http.statusCode == 401 || http.statusCode == 403 || contentType.contains("text/html") {
+            if http.statusCode == 401 || http.statusCode == 403 {
                 state = .expired
                 throw SBError.message("Your K12 sign-in expired — sign in again in this panel's settings")
             }
             guard (200..<300).contains(http.statusCode) else {
-                throw SBError.message("K12 portal HTTP \(http.statusCode)")
+                throw SBError.message("K12 portal HTTP \(http.statusCode) for \(path)")
+            }
+            // A lapsed session is answered with the login page. A mistyped or
+            // wrong-host path is answered with an HTML 404 — reporting that as
+            // an expired sign-in sent people back to re-authenticate over and
+            // over against a portal that had never rejected them.
+            if contentType.contains("text/html") {
+                state = .expired
+                throw SBError.message("Your K12 sign-in expired — sign in again in this panel's settings")
             }
         }
-        // Cookies may have been refreshed by the call.
-        saveCookies()
         return try JSONValue.parse(data)
     }
 }

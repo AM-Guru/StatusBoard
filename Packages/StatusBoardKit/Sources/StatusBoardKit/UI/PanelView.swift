@@ -4,29 +4,59 @@ import SwiftUI
 public struct PanelView: View {
     let panel: Panel
     let record: SnapshotRecord?
+    /// The board this panel is sitting on. Panels rendered off a board — in a
+    /// widget, on the watch, in a list — get the default look.
+    let boardAppearance: BoardAppearance
 
-    public init(panel: Panel, record: SnapshotRecord?) {
+    public init(panel: Panel, record: SnapshotRecord?,
+                boardAppearance: BoardAppearance = BoardAppearance()) {
         self.panel = panel
         self.record = record
+        self.boardAppearance = boardAppearance
     }
 
     var showsTitleBar: Bool {
+        if panel.settings.appearance.hidesTitleBar { return false }
         switch panel.kind {
         case .clock, .countdown, .text: return !panel.title.isEmpty && panel.title != panel.kind.displayName
         default: return true
         }
     }
 
+    private var appearance: PanelAppearance { panel.settings.appearance }
+
+    private var theme: SBThemeName {
+        SBPanelStyle.themeName(panel: panel, board: boardAppearance)
+    }
+
+    /// The panel's colors, plus whatever its live data wants to say about them.
+    /// An accent the user picked by hand always wins over a dynamic one.
+    private var resolved: (style: SBPanelStyle, dynamic: SBDynamicAppearance) {
+        let base = SBPanelStyle.resolve(panel: panel, board: boardAppearance)
+        let dynamic = SBDynamicResolver.resolve(panel: panel, snapshot: record?.snapshot,
+                                                style: base)
+        guard panel.settings.accentColorHex == nil, let tint = dynamic.tint else {
+            return (base, dynamic)
+        }
+        return (SBPanelStyle.resolve(panel: panel, board: boardAppearance,
+                                     dynamicAccent: tint), dynamic)
+    }
+
     public var body: some View {
+        let resolution = resolved
+        let style = resolution.style
+        let dynamic = resolution.dynamic
+        let shape = RoundedRectangle(cornerRadius: appearance.resolvedCornerRadius(theme: theme),
+                                     style: .continuous)
         VStack(spacing: 0) {
             if showsTitleBar {
                 HStack(spacing: 6) {
                     Image(systemName: panel.kind.symbolName)
                         .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(panel.settings.accentColor ?? SBTheme.accent)
+                        .foregroundStyle(style.accent)
                     Text(panel.title.uppercased())
                         .font(SBTheme.titleFont(size: 11))
-                        .foregroundStyle(SBTheme.textSecondary)
+                        .foregroundStyle(style.textSecondary)
                         .kerning(1.5)
                         .lineLimit(1)
                     Spacer(minLength: 0)
@@ -43,13 +73,18 @@ public struct PanelView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipped()
         }
-        .environment(\.panelAccent, panel.settings.accentColor ?? SBTheme.accent)
-        .background(SBTheme.panelBackground)
-        .clipShape(RoundedRectangle(cornerRadius: SBTheme.panelCornerRadius, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: SBTheme.panelCornerRadius, style: .continuous)
-                .strokeBorder(SBTheme.panelBorder, lineWidth: 1)
-        )
+        .opacity(min(1, max(0, appearance.contentOpacity)))
+        .environment(\.panelAccent, style.accent)
+        .environment(\.sbStyle, style)
+        .background {
+            PanelBackgroundView(appearance: appearance, theme: theme,
+                                dynamic: dynamic, accent: style.accent)
+        }
+        .clipShape(shape)
+        .overlay(shape.strokeBorder(appearance.resolvedBorderColor(theme: theme),
+                                    lineWidth: appearance.resolvedBorderWidth()))
+        .shadow(color: appearance.glowRadius > 0 ? style.accent.opacity(0.55) : .clear,
+                radius: appearance.glowRadius)
         // A panel speaks as one element: charts and LCD digits are decorative
         // shapes, so VoiceOver reads a written summary instead.
         .accessibilityElement(children: .ignore)
@@ -102,6 +137,12 @@ public struct PanelView: View {
         case .assignments:
             if case .assignments(let digest)? = record?.snapshot {
                 AssignmentsPanelView(digest: digest, settings: panel.settings)
+            } else {
+                SnapshotContentView(record: record, settings: panel.settings)
+            }
+        case .tessie:
+            if case .vehicle(let vehicle)? = record?.snapshot {
+                TessiePanelView(vehicle: vehicle, settings: panel.settings)
             } else {
                 SnapshotContentView(record: record, settings: panel.settings)
             }

@@ -40,7 +40,11 @@ public enum AccessibilitySummary {
 
         case .feed(let items):
             guard let first = items.first else { return "No items" }
-            return "\(count(items.count, "item")). Latest: \(first.title)"
+            // VoiceOver can't see the site icons, so the source is spoken.
+            let sources = Set(items.compactMap(\.sourceName)).count
+            let from = first.sourceName.map { ", from \($0)" } ?? ""
+            let across = sources > 1 ? " across \(count(sources, "source"))" : ""
+            return "\(count(items.count, "item"))\(across). Latest: \(first.title)\(from)"
 
         case .weather(let report):
             var text = "\(Int(report.temperatureC.rounded())) degrees celsius, \(report.conditionDescription)"
@@ -64,8 +68,11 @@ public enum AccessibilitySummary {
             if !degraded.isEmpty { parts.append("\(list(degraded.map(\.name))) degraded") }
             return parts.joined(separator: ", ")
 
-        case .grades(let grades):
-            guard !grades.isEmpty else { return "No grades" }
+        case .grades(let all):
+            guard !all.isEmpty else { return "No grades" }
+            // Reads what's on screen: unchecked classes aren't spoken either.
+            let grades = settings.visibleGrades(all)
+            guard !grades.isEmpty else { return "Every class is hidden" }
             return grades.map { grade in
                 let score = grade.score.map { "\(Int($0.rounded())) percent" } ?? "no score"
                 return "\(grade.course), \(score)"
@@ -88,6 +95,9 @@ public enum AccessibilitySummary {
             if !digest.due.isEmpty { parts.append("\(count(digest.due.count, "due today"))") }
             if !digest.redo.isEmpty { parts.append("\(count(digest.redo.count, "to redo"))") }
             return list(parts)
+
+        case .vehicle(let vehicle):
+            return TessieReadout.summary(for: vehicle, settings: settings)
 
         case .image:
             return "Image"

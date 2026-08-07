@@ -3,8 +3,9 @@ import Foundation
 /// Grades for every active course, from Canvas.
 public enum GradesSource {
     public static func fetch(settings: PanelSettings) async -> DataSnapshot {
-        guard let config = settings.connector,
-              var host = config.projectURL?.trimmingCharacters(in: .whitespaces), !host.isEmpty,
+        // Falls back to whatever another Canvas panel was signed in with.
+        let config = await CanvasCredentials.resolved(settings.connector)
+        guard var host = config.projectURL?.trimmingCharacters(in: .whitespaces), !host.isEmpty,
               let token = config.token, !token.isEmpty else {
             return .error("Enter your Canvas URL and access token in the panel settings")
         }
@@ -76,8 +77,9 @@ public enum ScheduleSource {
 /// per active course and merges the results.
 public enum AssignmentsSource {
     public static func fetch(settings: PanelSettings) async -> DataSnapshot {
-        guard let config = settings.connector,
-              var host = config.projectURL?.trimmingCharacters(in: .whitespaces), !host.isEmpty,
+        // Falls back to whatever another Canvas panel was signed in with.
+        let config = await CanvasCredentials.resolved(settings.connector)
+        guard var host = config.projectURL?.trimmingCharacters(in: .whitespaces), !host.isEmpty,
               let token = config.token, !token.isEmpty else {
             return .error("Enter your Canvas URL and access token in the panel settings")
         }

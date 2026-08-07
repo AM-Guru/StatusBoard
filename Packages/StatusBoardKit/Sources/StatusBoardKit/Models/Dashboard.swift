@@ -11,10 +11,14 @@ public struct Dashboard: Identifiable, Codable, Hashable, Sendable {
     /// Per-screen arrangements, keyed by `SBDeviceClass.rawValue`. A device with
     /// no entry here follows `grid` and each panel's own `frame`.
     public var deviceLayouts: [String: BoardLayout]
+    /// The board's own look: theme, wallpaper, and the backdrop panels mask
+    /// through when they are set to `PanelBackgroundStyle.boardBackdrop`.
+    public var appearance: BoardAppearance
 
     public init(id: UUID = UUID(), name: String, grid: BoardGrid = BoardGrid(),
                 panels: [Panel] = [], createdAt: Date = Date(), modifiedAt: Date = Date(),
-                deviceLayouts: [String: BoardLayout] = [:]) {
+                deviceLayouts: [String: BoardLayout] = [:],
+                appearance: BoardAppearance = BoardAppearance()) {
         self.id = id
         self.name = name
         self.grid = grid
@@ -22,6 +26,7 @@ public struct Dashboard: Identifiable, Codable, Hashable, Sendable {
         self.createdAt = createdAt
         self.modifiedAt = modifiedAt
         self.deviceLayouts = deviceLayouts
+        self.appearance = appearance
     }
 
     /// Hand-written so boards saved before per-device layouts existed — on disk
@@ -36,6 +41,8 @@ public struct Dashboard: Identifiable, Codable, Hashable, Sendable {
         modifiedAt = try container.decode(Date.self, forKey: .modifiedAt)
         deviceLayouts = try container.decodeIfPresent([String: BoardLayout].self,
                                                       forKey: .deviceLayouts) ?? [:]
+        appearance = try container.decodeIfPresent(BoardAppearance.self,
+                                                   forKey: .appearance) ?? BoardAppearance()
     }
 
     /// The first slot that fits, or nil when the board is full.
@@ -200,7 +207,11 @@ extension Dashboard {
                   frame: GridRect(x: 0, y: 1, width: 4, height: 2),
                   settings: {
                       var settings = PanelSettings()
-                      settings.url = "https://developer.apple.com/news/rss/news.rss"
+                      settings.feedSources = [
+                          FeedSource(url: "https://developer.apple.com/news/rss/news.rss"),
+                          FeedSource(url: "https://www.swift.org/atom.xml"),
+                      ]
+                      settings.url = settings.feedSources.first?.url
                       return settings
                   }()),
             Panel(kind: .graph, title: "Mac CPU",

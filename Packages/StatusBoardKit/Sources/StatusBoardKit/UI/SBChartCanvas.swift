@@ -3,6 +3,7 @@ import SwiftUI
 /// Immediate-mode chart renderer covering the full TerminalWidget-style
 /// family. One Canvas, one style switch — no charting framework.
 public struct SBChartCanvas: View {
+    @Environment(\.sbStyle) private var sbStyle
     let series: SeriesData
     let style: ChartStyle
     let baseline: Double?
@@ -108,12 +109,12 @@ public struct SBChartCanvas: View {
             var path = Path()
             path.move(to: CGPoint(x: plot.minX, y: lineY))
             path.addLine(to: CGPoint(x: plot.maxX, y: lineY))
-            context.stroke(path, with: .color(SBTheme.panelBorder.opacity(0.6)),
+            context.stroke(path, with: .color(sbStyle.separator.opacity(0.6)),
                            style: StrokeStyle(lineWidth: 1))
             let value = scale.min + (scale.max - scale.min) * fraction
             let label = Text(compact(value))
                 .font(.system(size: 9, design: .rounded))
-                .foregroundStyle(SBTheme.textSecondary)
+                .foregroundStyle(sbStyle.textSecondary)
             context.draw(label, at: CGPoint(x: plot.maxX + 4, y: lineY),
                          anchor: .leading)
         }
@@ -130,7 +131,7 @@ public struct SBChartCanvas: View {
         for (index, label) in labeled.enumerated() where index % stride == 0 {
             let text = Text(label.1)
                 .font(.system(size: 8, design: .rounded))
-                .foregroundStyle(SBTheme.textSecondary)
+                .foregroundStyle(sbStyle.textSecondary)
             context.draw(text, at: CGPoint(x: x(label.0, plot: plot), y: size.height - 6),
                          anchor: .center)
         }
@@ -233,7 +234,7 @@ public struct SBChartCanvas: View {
         var axis = Path()
         axis.move(to: CGPoint(x: plot.minX, y: midY))
         axis.addLine(to: CGPoint(x: plot.maxX, y: midY))
-        context.stroke(axis, with: .color(SBTheme.textSecondary.opacity(0.5)),
+        context.stroke(axis, with: .color(sbStyle.textSecondary.opacity(0.5)),
                        style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         for (index, delta) in deltas.enumerated() {
             let height = max(2, plot.height / 2 * CGFloat(abs(delta) / magnitude))
@@ -241,7 +242,7 @@ public struct SBChartCanvas: View {
             let frame = CGRect(x: barX, y: delta >= 0 ? midY - height : midY,
                                width: width, height: height)
             context.fill(Path(roundedRect: frame, cornerRadius: min(2, width / 3)),
-                         with: .color(delta >= 0 ? SBTheme.good : SBTheme.bad))
+                         with: .color(delta >= 0 ? sbStyle.good : sbStyle.bad))
         }
     }
 
@@ -251,10 +252,10 @@ public struct SBChartCanvas: View {
         var rule = Path()
         rule.move(to: CGPoint(x: plot.minX, y: limitY))
         rule.addLine(to: CGPoint(x: plot.maxX, y: limitY))
-        context.stroke(rule, with: .color(SBTheme.warn.opacity(0.8)),
+        context.stroke(rule, with: .color(sbStyle.warn.opacity(0.8)),
                        style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
         context.stroke(linePath(scale: scale, plot: plot, smooth: false),
-                       with: .color(SBTheme.textSecondary.opacity(0.6)),
+                       with: .color(sbStyle.textSecondary.opacity(0.6)),
                        style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
         for index in values.indices {
             let over = values[index] > limit
@@ -262,7 +263,7 @@ public struct SBChartCanvas: View {
                              y: y(values[index], scale: scale, plot: plot) - 3,
                              width: 6, height: 6)
             context.fill(Path(ellipseIn: dot),
-                         with: .color(over ? SBTheme.bad : SBTheme.good))
+                         with: .color(over ? sbStyle.bad : sbStyle.good))
         }
     }
 

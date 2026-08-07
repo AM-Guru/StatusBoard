@@ -4,14 +4,14 @@ import SwiftUI
 enum SchoolStyle {
     /// Grade colors run green → amber → red so a wall of classes reads at a
     /// glance from across the room.
-    static func color(forScore score: Double?) -> Color {
-        guard let score else { return SBTheme.textSecondary }
+    static func color(forScore score: Double?, in sbStyle: SBPanelStyle) -> Color {
+        guard let score else { return sbStyle.textSecondary }
         switch score {
-        case 90...: return SBTheme.good
+        case 90...: return sbStyle.good
         case 80..<90: return Color(hex: 0x9ACD32)
-        case 70..<80: return SBTheme.warn
+        case 70..<80: return sbStyle.warn
         case 60..<70: return Color(hex: 0xFF8C42)
-        default: return SBTheme.bad
+        default: return sbStyle.bad
         }
     }
 
@@ -35,23 +35,42 @@ enum SchoolStyle {
 // MARK: - Grades
 
 struct GradesPanelView: View {
+    @Environment(\.sbStyle) private var sbStyle
     let grades: [CourseGrade]
     let settings: PanelSettings
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                ForEach(grades) { grade in
-                    row(grade)
-                }
+        let visible = settings.visibleGrades(grades)
+        if visible.isEmpty && !grades.isEmpty {
+            VStack(spacing: 6) {
+                Image(systemName: "eye.slash")
+                    .font(.system(size: 24))
+                    .foregroundStyle(sbStyle.textSecondary)
+                Text("Every class is hidden")
+                    .font(.system(size: 14, weight: .semibold, design: .rounded))
+                    .foregroundStyle(sbStyle.textPrimary)
+                Text("Check one again in the panel's settings.")
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(sbStyle.textSecondary)
+                    .multilineTextAlignment(.center)
             }
             .padding(10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(visible) { grade in
+                        row(grade)
+                    }
+                }
+                .padding(10)
+            }
         }
     }
 
     @ViewBuilder
     private func row(_ grade: CourseGrade) -> some View {
-        let tint = SchoolStyle.color(forScore: grade.score)
+        let tint = SchoolStyle.color(forScore: grade.score, in: sbStyle)
         let content = HStack(spacing: 10) {
             // Letter badge carries the color, so the row scans instantly.
             Text(grade.displayLetter)
@@ -63,12 +82,12 @@ struct GradesPanelView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(SchoolStyle.alias(grade.course, in: settings))
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(SBTheme.textPrimary)
+                    .foregroundStyle(sbStyle.textPrimary)
                     .lineLimit(1)
                 // A slim bar makes relative standing obvious without a chart.
                 GeometryReader { proxy in
                     ZStack(alignment: .leading) {
-                        Capsule().fill(SBTheme.panelBorder)
+                        Capsule().fill(sbStyle.separator)
                         Capsule().fill(tint)
                             .frame(width: max(3, proxy.size.width * min(1, (grade.score ?? 0) / 100)))
                     }
@@ -97,6 +116,7 @@ struct GradesPanelView: View {
 // MARK: - Schedule
 
 struct SchedulePanelView: View {
+    @Environment(\.sbStyle) private var sbStyle
     let classes: [ScheduledClass]
     let settings: PanelSettings
 
@@ -126,13 +146,13 @@ struct SchedulePanelView: View {
         VStack(spacing: 6) {
             Image(systemName: "checkmark.circle")
                 .font(.system(size: 26))
-                .foregroundStyle(SBTheme.good)
+                .foregroundStyle(sbStyle.good)
             Text(title)
                 .font(.system(size: 16, weight: .semibold, design: .rounded))
-                .foregroundStyle(SBTheme.textPrimary)
+                .foregroundStyle(sbStyle.textPrimary)
             Text(detail)
                 .font(.system(size: 12, design: .rounded))
-                .foregroundStyle(SBTheme.textSecondary)
+                .foregroundStyle(sbStyle.textSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -140,7 +160,7 @@ struct SchedulePanelView: View {
     @ViewBuilder
     private func row(_ item: ScheduledClass, now: Date) -> some View {
         let live = item.isLive(at: now)
-        let tint = live ? SBTheme.good : (item.attendanceRequired ? SBTheme.accent : SBTheme.secondaryAccent)
+        let tint = live ? sbStyle.good : (item.attendanceRequired ? sbStyle.accent : SBTheme.secondaryAccent)
         let content = HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.timeText)
@@ -149,11 +169,11 @@ struct SchedulePanelView: View {
                 if live {
                     Text("● now")
                         .font(.system(size: 10, weight: .bold, design: .rounded))
-                        .foregroundStyle(SBTheme.good)
+                        .foregroundStyle(sbStyle.good)
                 } else if let start = item.start {
                     Text(SchoolStyle.countdown(to: start, from: now))
                         .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(SBTheme.textSecondary)
+                        .foregroundStyle(sbStyle.textSecondary)
                 }
             }
             .frame(width: 72, alignment: .leading)
@@ -161,7 +181,7 @@ struct SchedulePanelView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(SchoolStyle.alias(item.course, in: settings))
                     .font(.system(size: 14, weight: .semibold, design: .rounded))
-                    .foregroundStyle(SBTheme.textPrimary)
+                    .foregroundStyle(sbStyle.textPrimary)
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     if item.attendanceRequired {
@@ -173,7 +193,7 @@ struct SchedulePanelView: View {
                     if let teacher = item.teacher {
                         Text(teacher)
                             .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(SBTheme.textSecondary)
+                            .foregroundStyle(sbStyle.textSecondary)
                             .lineLimit(1)
                     }
                 }
@@ -183,13 +203,13 @@ struct SchedulePanelView: View {
             if item.url != nil {
                 Image(systemName: live ? "video.fill" : "chevron.right")
                     .font(.system(size: live ? 13 : 11, weight: .bold))
-                    .foregroundStyle(live ? SBTheme.good : SBTheme.textSecondary)
+                    .foregroundStyle(live ? sbStyle.good : sbStyle.textSecondary)
             }
             #endif
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
-        .background(live ? SBTheme.good.opacity(0.12) : Color.clear,
+        .background(live ? sbStyle.good.opacity(0.12) : Color.clear,
                     in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
         #if os(tvOS) || os(watchOS)
@@ -207,6 +227,7 @@ struct SchedulePanelView: View {
 // MARK: - Assignments
 
 struct AssignmentsPanelView: View {
+    @Environment(\.sbStyle) private var sbStyle
     let digest: AssignmentDigest
     let settings: PanelSettings
 
@@ -215,30 +236,30 @@ struct AssignmentsPanelView: View {
             VStack(spacing: 6) {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.system(size: 28))
-                    .foregroundStyle(SBTheme.good)
+                    .foregroundStyle(sbStyle.good)
                 Text("All caught up")
                     .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    .foregroundStyle(SBTheme.textPrimary)
+                    .foregroundStyle(sbStyle.textPrimary)
                 if digest.awaitingGrading > 0 {
                     Text("\(digest.awaitingGrading) waiting to be graded")
                         .font(.system(size: 12, design: .rounded))
-                        .foregroundStyle(SBTheme.textSecondary)
+                        .foregroundStyle(sbStyle.textSecondary)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    section("Late", items: digest.late, tint: SBTheme.bad,
+                    section("Late", items: digest.late, tint: sbStyle.bad,
                             icon: "exclamationmark.triangle.fill")
                     section("Due Today", items: digest.due, tint: SBTheme.accent,
                             icon: "clock.fill")
-                    section("Re-Do", items: digest.redo, tint: SBTheme.warn,
+                    section("Re-Do", items: digest.redo, tint: sbStyle.warn,
                             icon: "arrow.uturn.backward.circle.fill")
                     if digest.awaitingGrading > 0 {
                         Text("\(digest.awaitingGrading) submitted, waiting on a grade")
                             .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(SBTheme.textSecondary)
+                            .foregroundStyle(sbStyle.textSecondary)
                             .padding(.horizontal, 10)
                     }
                 }
@@ -284,13 +305,13 @@ struct AssignmentsPanelView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(SBTheme.textPrimary)
+                    .foregroundStyle(sbStyle.textPrimary)
                     .lineLimit(2)
                 HStack(spacing: 6) {
                     if !item.course.isEmpty {
                         Text(SchoolStyle.alias(item.course, in: settings))
                             .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(SBTheme.textSecondary)
+                            .foregroundStyle(sbStyle.textSecondary)
                             .lineLimit(1)
                     }
                     if item.state == .redo, let scoreText = item.scoreText {
@@ -300,14 +321,14 @@ struct AssignmentsPanelView: View {
                         if let percent = item.percent {
                             Text("\(Int(percent.rounded()))%")
                                 .font(.system(size: 10, design: .rounded))
-                                .foregroundStyle(SBTheme.textSecondary)
+                                .foregroundStyle(sbStyle.textSecondary)
                         }
                     } else if let due = item.due {
                         Text(item.state == .late
                              ? "was due \(due.formatted(.dateTime.month(.abbreviated).day()))"
                              : due.formatted(.dateTime.hour().minute()))
                             .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(SBTheme.textSecondary)
+                            .foregroundStyle(sbStyle.textSecondary)
                     }
                 }
             }
@@ -316,7 +337,7 @@ struct AssignmentsPanelView: View {
             if item.url != nil {
                 Image(systemName: "arrow.up.right.square")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(SBTheme.textSecondary)
+                    .foregroundStyle(sbStyle.textSecondary)
             }
             #endif
         }

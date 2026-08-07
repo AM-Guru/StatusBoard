@@ -7,6 +7,7 @@ import WebKit
 /// on the panel's refresh interval; on tvOS the Mac bridge renders it to an
 /// image (handled by DataSourceEngine → SnapshotContentView).
 struct WebClipPanelContent: View {
+    @Environment(\.sbStyle) private var sbStyle
     let panel: Panel
     let record: SnapshotRecord?
 
@@ -24,10 +25,10 @@ struct WebClipPanelContent: View {
                 VStack(spacing: 6) {
                     Image(systemName: "safari")
                         .font(.system(size: 22))
-                        .foregroundStyle(SBTheme.textSecondary)
+                        .foregroundStyle(sbStyle.textSecondary)
                     Text(panel.settings.url ?? "Web clip")
                         .font(.system(size: 12, design: .rounded))
-                        .foregroundStyle(SBTheme.textSecondary)
+                        .foregroundStyle(sbStyle.textSecondary)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)

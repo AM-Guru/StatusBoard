@@ -3,6 +3,7 @@ import SwiftUI
 /// Renders a 0–1 fraction in any of the TerminalWidget-style progress
 /// formats: bar, circle, watch, dots, stack, matrix, gradient.
 public struct ProgressContentView: View {
+    @Environment(\.sbStyle) private var sbStyle
     let fraction: Double
     let label: String
     let format: ProgressFormat
@@ -48,7 +49,7 @@ public struct ProgressContentView: View {
     var percentText: some View {
         Text(label)
             .font(SBTheme.lcdFont(size: 22))
-            .foregroundStyle(SBTheme.textPrimary)
+            .foregroundStyle(sbStyle.textPrimary)
             .contentTransition(.numericText())
     }
 
@@ -60,7 +61,7 @@ public struct ProgressContentView: View {
             percentText
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule().fill(SBTheme.panelBorder)
+                    Capsule().fill(sbStyle.separator)
                     Capsule().fill(accent)
                         .frame(width: max(6, proxy.size.width * fraction))
                 }
@@ -89,13 +90,13 @@ public struct ProgressContentView: View {
                             path.addLine(to: CGPoint(x: center.x + radius * cos(angle),
                                                      y: center.y + radius * sin(angle)))
                             context.stroke(path,
-                                           with: .color(isLit ? accent : SBTheme.panelBorder),
+                                           with: .color(isLit ? accent : sbStyle.separator),
                                            style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         }
                     }
                 } else {
                     Circle()
-                        .stroke(SBTheme.panelBorder, lineWidth: 8)
+                        .stroke(sbStyle.separator, lineWidth: 8)
                     Circle()
                         .trim(from: 0, to: fraction)
                         .stroke(accent,
@@ -178,7 +179,7 @@ public struct ProgressContentView: View {
             percentText
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 7).fill(SBTheme.panelBorder)
+                    RoundedRectangle(cornerRadius: 7).fill(sbStyle.separator)
                     // Full-length gradient clipped to the fraction, so the
                     // colors stay put as progress moves (TerminalWidget-style).
                     LinearGradient(colors: [SBTheme.secondaryAccent, accent],

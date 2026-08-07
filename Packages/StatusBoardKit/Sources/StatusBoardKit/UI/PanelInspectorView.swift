@@ -14,11 +14,36 @@ public struct PanelInspectorView: View {
     @State private var loginPassword = ""
     @State private var savedCredentialHost: String?
     @State private var showingK12SignIn = false
+    @State private var tessieVehicles: [TessieSource.VehicleSummary] = []
+    @State private var tessieLookupError: String?
+    @State private var isLoadingTessieVehicles = false
     @Environment(\.dismiss) private var dismiss
 
+    @MainActor
     public init(model: AppModel, panel: Panel, dashboardID: Dashboard.ID) {
         self.model = model
         self.dashboardID = dashboardID
+        // A Canvas panel arrives already filled in from whatever a previous
+        // one was signed in with. Done here rather than in `onAppear` so it
+        // counts as the panel's starting state, not as an unsaved edit that
+        // would then block swiping the sheet away.
+        var panel = panel
+        if panel.kind.usesCanvasCredentials {
+            var connector = panel.settings.connector ?? ConnectorConfig()
+            CanvasCredentials.shared.applyDefaults(to: &connector)
+            panel.settings.connector = connector
+        }
+        if panel.kind.usesTessieCredentials {
+            var connector = panel.settings.connector ?? ConnectorConfig()
+            TessieCredentials.shared.applyDefaults(to: &connector)
+            panel.settings.connector = connector
+        }
+        // A panel saved before multi-feed support keeps its one URL in
+        // `settings.url`; lift it into the editable list so it shows up as a
+        // row rather than looking like the panel lost its feed.
+        if panel.kind == .feed {
+            panel.settings.migrateFeedSourcesIfNeeded()
+        }
         self.original = panel
         self._draft = State(initialValue: panel)
     }
@@ -55,7 +80,10 @@ public struct PanelInspectorView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        normalizeFeedSettings()
                         model.store.updatePanel(draft, in: dashboardID)
+                        shareCanvasCredentials()
+                        shareTessieCredentials()
                         model.engine.refreshNow(panel: draft)
                         dismiss()
                     }
@@ -94,11 +122,7 @@ public struct PanelInspectorView: View {
             }
 
         case .weather:
-            Section("Location") {
-                TextField("Name", text: optionalString($draft.settings.locationName))
-                TextField("Latitude", text: optionalDouble($draft.settings.latitude))
-                TextField("Longitude", text: optionalDouble($draft.settings.longitude))
-            }
+            WeatherLocationSection(settings: $draft.settings)
 
         case .countdown:
             Section("Countdown") {
@@ -118,15 +142,19 @@ public struct PanelInspectorView: View {
             }
 
         case .feed:
-            Section("Feed") {
-                TextField("RSS / Atom URL", text: optionalString($draft.settings.url))
-                    .autocorrectionOff()
+            feedSourcesSection
+            Section("Display") {
                 Picker("Display", selection: $draft.settings.listDisplay) {
                     ForEach(ListDisplayMode.allCases, id: \.self) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
+                Toggle("Show site icons", isOn: $draft.settings.feedShowsSourceIcons)
+                Toggle("Show source names", isOn: $draft.settings.feedShowsSourceNames)
+                Text("Items from every feed are merged into one list, newest first. Source names appear once a panel has more than one feed.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
         case .calendar:
@@ -293,6 +321,7 @@ public struct PanelInspectorView: View {
                      : "Due today and late work. Anything finished at 100%, or handed in and waiting on a grade, is hidden. Graded below 100% moves to Re-Do.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                canvasSharingNote
             }
             aliasSection
 
@@ -326,6 +355,9 @@ public struct PanelInspectorView: View {
             }
             aliasSection
 
+        case .tessie:
+            tessieSections
+
         case .health:
             Section("Health") {
                 Picker("Metric", selection: $draft.settings.healthMetric) {
@@ -338,6 +370,231 @@ public struct PanelInspectorView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    // MARK: - Feeds
+
+    /// One row per feed, merged into a single list at fetch time.
+    @ViewBuilder
+    private var feedSourcesSection: some View {
+        Section("Feeds") {
+            ForEach($draft.settings.feedSources) { $source in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        TextField("Name (optional)", text: $source.name)
+                            .font(.headline)
+                        Toggle("Include", isOn: $source.isEnabled)
+                            .labelsHidden()
+                            .accessibilityLabel("Include \(feedRowLabel(source))")
+                    }
+                    TextField("RSS / Atom URL", text: $source.url)
+                        .autocorrectionOff()
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(source.isEnabled ? .primary : .secondary)
+                }
+                .padding(.vertical, 2)
+            }
+            .onDelete { draft.settings.feedSources.remove(atOffsets: $0) }
+            .onMove { draft.settings.feedSources.move(fromOffsets: $0, toOffset: $1) }
+
+            Button {
+                draft.settings.feedSources.append(FeedSource())
+            } label: {
+                Label("Add Feed", systemImage: "plus.circle")
+            }
+
+            if draft.settings.feedSources.isEmpty {
+                Text("Add one or more RSS or Atom feeds. Leave a name blank to use the feed's own title.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Tidies the feed list on the way out: blank rows added and never filled
+    /// in are dropped, and the legacy single-URL field is kept pointing at the
+    /// first feed so older builds (and synced devices) still fetch something.
+    private func normalizeFeedSettings() {
+        guard draft.kind == .feed else { return }
+        var sources = draft.settings.feedSources
+        for index in sources.indices {
+            sources[index].url = sources[index].trimmedURL
+            sources[index].name = sources[index].name.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        sources.removeAll { $0.url.isEmpty }
+        draft.settings.feedSources = sources
+        draft.settings.url = sources.first(where: \.isEnabled)?.url ?? sources.first?.url
+    }
+
+    private func feedRowLabel(_ source: FeedSource) -> String {
+        let name = source.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
+        let trimmed = source.trimmedURL
+        return trimmed.isEmpty ? "this feed" : trimmed
+    }
+
+    // MARK: - Tessie
+
+    private var tessieConnector: Binding<ConnectorConfig> {
+        Binding(get: { draft.settings.connector ?? ConnectorConfig() },
+                set: { draft.settings.connector = $0 })
+    }
+
+    @ViewBuilder
+    private var tessieSections: some View {
+        Section("Tessie") {
+            SecureField("API key", text: optionalString(tessieConnector.token))
+            HStack {
+                TextField("VIN", text: optionalString(tessieConnector.query))
+                    .autocorrectionOff()
+                Button {
+                    loadTessieVehicles()
+                } label: {
+                    if isLoadingTessieVehicles {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled((tessieConnector.wrappedValue.token ?? "").isEmpty
+                          || isLoadingTessieVehicles)
+            }
+            // Typing a VIN from memory is a mistake waiting to happen, so the
+            // account's own cars are offered as soon as the key works.
+            if !tessieVehicles.isEmpty {
+                Picker("Vehicle", selection: Binding(
+                    get: { tessieConnector.wrappedValue.query ?? "" },
+                    set: { tessieConnector.wrappedValue.query = $0.isEmpty ? nil : $0 })) {
+                    Text("First on the account").tag("")
+                    ForEach(tessieVehicles) { vehicle in
+                        Text(vehicle.name).tag(vehicle.vin)
+                    }
+                }
+            }
+            if let tessieLookupError {
+                Label(tessieLookupError, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(SBTheme.warn)
+            }
+            Text("Create a key at tessie.com under Settings → API. Leave the VIN blank to show the first car on the account. This panel only reads — it never sends commands to the car.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Label("The API key is shared with every Tesla panel — saving here updates them all.",
+                  systemImage: "link")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+
+        Section("Layout") {
+            Toggle("Switch layouts automatically", isOn: $draft.settings.tessieAutoContext)
+            if !draft.settings.tessieAutoContext {
+                Picker("Always show", selection: $draft.settings.tessieContext) {
+                    ForEach(TessieContext.allCases) { context in
+                        Text(context.displayName).tag(context)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+            Text(draft.settings.tessieAutoContext
+                 ? "The panel shows the Parked list while the car is in park, and swaps to the Driving list the moment it moves."
+                 : "The panel always shows one list, which is what you want while arranging a board.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+
+        tessieFieldSection("When Parked", fields: $draft.settings.tessieParkedFields)
+        tessieFieldSection("When Driving", fields: $draft.settings.tessieDrivingFields)
+
+        if draft.settings.tessieParkedFields.contains(.speed)
+            || draft.settings.tessieDrivingFields.contains(.speed) {
+            Section("Speed Limit") {
+                Text("Neither Tesla nor Tessie publishes the posted speed limit, so the panel reads it from OpenStreetMap: while the car is moving, its coordinates go to overpass-api.de and the limit for the nearest road comes back. Nothing else is sent — no key, no VIN, no vehicle name — and nothing is asked while the car is parked.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text("Tesla's own Speed Limit Mode is a cap the owner sets on the touchscreen, not the posted limit. It shows here too, when it is switched on.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// One context's field list. Selected fields sort to the top in the order
+    /// they will be drawn, with the first one flagged as the headline — the
+    /// arrangement decision that actually changes how the panel reads.
+    @ViewBuilder
+    private func tessieFieldSection(_ title: String,
+                                    fields: Binding<[TessieField]>) -> some View {
+        let selected = fields.wrappedValue
+        let remaining = TessieField.allCases.filter { !selected.contains($0) }
+        Section(title) {
+            ForEach(selected + remaining) { field in
+                let isOn = selected.contains(field)
+                Toggle(isOn: Binding(
+                    get: { isOn },
+                    set: { newValue in
+                        if newValue {
+                            if !fields.wrappedValue.contains(field) {
+                                fields.wrappedValue.append(field)
+                            }
+                        } else {
+                            fields.wrappedValue.removeAll { $0 == field }
+                        }
+                    })) {
+                    HStack(spacing: 8) {
+                        Image(systemName: field.symbolName)
+                            .frame(width: 20)
+                            .foregroundStyle(.secondary)
+                        Text(field.displayName)
+                        if isOn, field != .map, selected.first == field {
+                            Text("HEADLINE")
+                                .font(.system(size: 8, weight: .heavy, design: .rounded))
+                                .foregroundStyle(SBTheme.accent)
+                        }
+                        Spacer(minLength: 0)
+                        if isOn, field != .map, selected.first != field {
+                            Button("Show First") {
+                                fields.wrappedValue.removeAll { $0 == field }
+                                fields.wrappedValue.insert(field, at: 0)
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.caption)
+                        }
+                    }
+                }
+            }
+            Text("The first field with data is drawn large; the rest become tiles. Map gets its own block wherever it sits.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func loadTessieVehicles() {
+        guard let key = tessieConnector.wrappedValue.token, !key.isEmpty else { return }
+        isLoadingTessieVehicles = true
+        tessieLookupError = nil
+        Task {
+            do {
+                tessieVehicles = try await TessieSource.vehicles(apiKey: key)
+                if tessieVehicles.isEmpty {
+                    tessieLookupError = "No vehicles on this Tessie account"
+                }
+            } catch {
+                tessieVehicles = []
+                tessieLookupError = error.localizedDescription
+            }
+            isLoadingTessieVehicles = false
+        }
+    }
+
+    /// Publishes the key typed here to every other Tesla panel, so rotating it
+    /// doesn't leave the rest of the board signed out.
+    private func shareTessieCredentials() {
+        guard draft.kind.usesTessieCredentials, let connector = draft.settings.connector,
+              TessieCredentials.shared.adopt(apiKey: connector.token,
+                                             vin: connector.query) else { return }
+        model.store.applyTessieCredentials(apiKey: TessieCredentials.shared.apiKey,
+                                           excluding: draft.id)
     }
 
     /// Shared plumbing for the external-service connector kinds.
@@ -442,6 +699,7 @@ public struct PanelInspectorView: View {
                 Text("Use your school's own Canvas address — for K12/Stride that is learn2.k12.com, not school.instructure.com. Create a token at that address under Account → Settings → “+ New Access Token”. If your school has disabled tokens, use a Schedule panel and sign in there instead. The token is stored in your dashboard, which syncs only through your private iCloud database.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                canvasSharingNote
             }
 
         case .k12schedule:
@@ -605,15 +863,49 @@ public struct PanelInspectorView: View {
                 set: { draft.settings.connector = $0 })
     }
 
-    /// Rename classes to something short and human. Course names are taken
-    /// from the panel's current data, so there's nothing to type from memory.
+    /// Says out loud that these fields are shared, so changing them here to
+    /// reach a different school doesn't quietly re-point every other panel.
+    @ViewBuilder
+    private var canvasSharingNote: some View {
+        Label("Shared with every Canvas panel — saving here updates them all.",
+              systemImage: "link")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+    }
+
+    /// Publishes the credentials typed here to every other Canvas panel, so a
+    /// rotated token doesn't leave the rest of the board signed out.
+    private func shareCanvasCredentials() {
+        guard draft.kind.usesCanvasCredentials, let connector = draft.settings.connector,
+              CanvasCredentials.shared.adopt(host: connector.projectURL,
+                                             token: connector.token) else { return }
+        model.store.applyCanvasCredentials(host: CanvasCredentials.shared.host,
+                                           token: CanvasCredentials.shared.token,
+                                           excluding: draft.id)
+    }
+
+    /// Rename classes to something short and human, and — on a Grades panel —
+    /// uncheck the ones that aren't really graded courses. Course names are
+    /// taken from the panel's current data, so there's nothing to type from
+    /// memory, and an unchecked class stays listed here so it can come back.
     @ViewBuilder
     private var aliasSection: some View {
         let names = courseNamesInCurrentData()
+        let hideable = draft.kind == .grades
         if !names.isEmpty {
-            Section("Class Names") {
+            Section(hideable ? "Classes" : "Class Names") {
                 ForEach(names, id: \.self) { name in
-                    LabeledContent {
+                    HStack(spacing: 10) {
+                        if hideable {
+                            Toggle("Show", isOn: showsCourse(name))
+                                .labelsHidden()
+                                .accessibilityLabel("Show \(name)")
+                        }
+                        Text(name)
+                            .font(.callout)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 8)
                         TextField(name, text: Binding(
                             get: { draft.settings.courseAliases[name] ?? "" },
                             set: { newValue in
@@ -624,11 +916,7 @@ public struct PanelInspectorView: View {
                                 }
                             }))
                         .multilineTextAlignment(.trailing)
-                    } label: {
-                        Text(name)
-                            .font(.callout)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        .accessibilityLabel("Name shown for \(name)")
                     }
                 }
                 if !draft.settings.courseAliases.isEmpty {
@@ -636,11 +924,30 @@ public struct PanelInspectorView: View {
                         draft.settings.courseAliases.removeAll()
                     }
                 }
-                Text("Leave blank to keep the school's name.")
+                if hideable && !draft.settings.hiddenCourses.isEmpty {
+                    Button("Show All Classes") {
+                        draft.settings.hiddenCourses.removeAll()
+                    }
+                }
+                Text(hideable
+                     ? "Uncheck a class to leave it off the panel — handy for enrollments like Counselor that carry no grade. Leave the name blank to keep the school's."
+                     : "Leave blank to keep the school's name.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Checked means shown, so the box reads the way the panel looks.
+    private func showsCourse(_ name: String) -> Binding<Bool> {
+        Binding(get: { !draft.settings.hiddenCourses.contains(name) },
+                set: { isOn in
+                    if isOn {
+                        draft.settings.hiddenCourses.remove(name)
+                    } else {
+                        draft.settings.hiddenCourses.insert(name)
+                    }
+                })
     }
 
     /// The class names present in whatever this panel last loaded.
@@ -663,17 +970,14 @@ public struct PanelInspectorView: View {
 
     // MARK: - Shared sections
 
+    @ViewBuilder
     private var appearanceSection: some View {
-        Section("Appearance") {
-            ColorPicker("Accent color", selection: Binding(
-                get: { draft.settings.accentColor ?? SBTheme.accent },
-                set: { draft.settings.accentColorHex = $0.hexString() }))
-            if draft.settings.accentColorHex != nil {
-                Button("Use Theme Color") {
-                    draft.settings.accentColorHex = nil
-                }
-            }
-        }
+        PanelAppearanceSection(
+            appearance: $draft.settings.appearance,
+            accentColorHex: $draft.settings.accentColorHex,
+            kind: draft.kind,
+            boardHasBackdrop: model.store.dashboard(id: dashboardID)?
+                .appearance.hasBackdrop ?? false)
     }
 
     /// Threshold alerts make sense wherever the panel's data is a number.

@@ -152,19 +152,45 @@ nextYearStartDate, school_canvas_id, school_instance_id`.
 
 The portal issues no API token, so a web view appears exactly **once**, as a
 sign-in sheet (`K12SignInView`) — the same role an OAuth sheet plays. On
-completion the `k12.com` cookies are copied out of the web view into
-`K12Session`'s own cookie jar, persisted in the **Keychain**, and every request
-after that is a native `URLSession` call. Panels never embed a web view, which
-is what makes this usable from widgets and background refreshes.
+completion the cookies within the portal's registrable domain (`k12.com`, which
+covers the `security-gateway.k12.com` SSO hop) are copied out of the web view
+into `K12Session`'s own cookie jar, persisted in the **Keychain**, and every
+request after that is a native `URLSession` call. Panels never embed a web
+view, which is what makes this usable from widgets and background refreshes.
 
-An expired session is detected by the portal answering with `text/html` (its
-login page) instead of JSON — the session flips to `.expired` and the panel
-says so rather than showing stale or empty data.
+A signed-out call is answered with **`401` and `{"error":"Unauthorized"}` as
+`application/json`** — verified 2026-08-07, with and without a browser
+`User-Agent`, so there is no UA or WAF gate to work around. `text/html` on an
+API path means a wrong path (an HTML 404), *not* an expired session; treating
+the two as the same is what made a working sign-in report itself as expired.
+
+### The cookie jar, and why it isn't `HTTPCookieStorage`
+
+`HTTPCookieStorage()` — the initializer, as opposed to `.shared` — returns a
+storage that **silently discards everything**. `setCookie` is a no-op (the
+cookie lands in `.shared` instead) and `cookies` reads back `nil`. Because the
+sign-in counted the cookies it *handed over* rather than the ones kept, it
+reported success, wrote an empty list to the Keychain, and then made every
+request with no session at all — which came back `401`, i.e. "your K12 sign-in
+expired", no matter how many times you signed in.
+
+`SessionCookieJar` replaces it: cookies in an array we own, RFC 6265
+domain/path/secure matching that is unit-tested, and an explicit `Cookie:`
+header per request with `httpShouldHandleCookies = false`. It also keeps the
+session out of the process-wide shared storage. Expiry is persisted as epoch
+seconds, because `HTTPCookie(properties:)` wants a real `Date` for `.expires`
+and quietly drops an ISO string.
 
 ## What this means for Status Board
 
 - **Assignments and grades** → Canvas panel with an API token. Fully native, no
-  browser needed, works on every platform.
+  browser needed, works on every platform. The address and token are shared by
+  every Canvas-backed panel (`canvas`, `grades`, `assignments`) through
+  `CanvasCredentials`: the first panel you fill in publishes them to the
+  Keychain, later panels start with them, and saving an edit sweeps the new
+  values across the others, so rotating a token can't leave half the board
+  signed out. Panels keep their own copy too — that is what syncs to your other
+  devices.
 - **Class times / day-off / attendance** → OLS via `K12Session`: sign in once,
   then native `URLSession` calls. Today's schedule is one parameter-free
   request; week views resolve the student id and course ids first.

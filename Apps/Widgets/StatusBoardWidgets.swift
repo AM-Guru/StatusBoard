@@ -116,6 +116,18 @@ struct PanelWidgetEntryView: View {
             return "\(Int(report.temperatureC.rounded()))°"
         case .feed(let items):
             return items.first?.title ?? "—"
+        case .vehicle(let vehicle):
+            // On a Lock Screen there is room for one fact, so it is whichever
+            // the car's own state makes urgent.
+            if vehicle.isDriving, let speed = vehicle.drive.speedMPH {
+                return TessieReadout.speed(speed, units: vehicle.units)
+            }
+            if let level = vehicle.battery.level {
+                return vehicle.isCharging
+                    ? "\(Int(level.rounded()))% ⚡"
+                    : "\(Int(level.rounded()))%"
+            }
+            return vehicle.connection.displayName
         default:
             return "—"
         }

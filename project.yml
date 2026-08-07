@@ -50,6 +50,14 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.network.client: true
         com.apple.security.network.server: true
+        # Weather panels set to Current Location. A sandboxed Mac app needs
+        # this as well as the usage string, or Core Location silently denies.
+        com.apple.security.personal-information.location: true
+        # Calendar panels. Same rule, but it fails louder: without this the
+        # sandbox refuses the XPC connection to the calendar daemon and every
+        # EventKit call — including the access prompt itself — comes back as
+        # "Mach error 4099", never reaching a permission dialog at all.
+        com.apple.security.personal-information.calendars: true
         com.apple.security.application-groups:
           - group.guru.am.statusboard
         com.apple.developer.icloud-container-identifiers:
@@ -68,6 +76,7 @@ targets:
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Status Board relays dashboard data between your devices on the local network.
         NSCalendarsFullAccessUsageDescription: Status Board shows your upcoming events on calendar panels.
+        NSLocationWhenInUseUsageDescription: Status Board uses your location only to show the weather where you are, on weather panels you set to Current Location. It stays on this device.
         NSBonjourServices:
           - _statusboard._tcp
         NSAppTransportSecurity:
@@ -131,6 +140,7 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         NSLocalNetworkUsageDescription: Status Board connects to the bridge on your Mac to receive live dashboard data.
         NSCalendarsFullAccessUsageDescription: Status Board shows your upcoming events on calendar panels.
+        NSLocationWhenInUseUsageDescription: Status Board uses your location only to show the weather where you are, on weather panels you set to Current Location. It stays on this device.
         NSBonjourServices:
           - _statusboard._tcp
         NSAppTransportSecurity:
@@ -179,6 +189,7 @@ targets:
         # "This beta requires an iPhone or iPad".
         ITSAppUsesNonExemptEncryption: false
         NSLocalNetworkUsageDescription: Status Board connects to the bridge on your Mac to receive live dashboard data.
+        NSLocationWhenInUseUsageDescription: Status Board uses your location only to show the weather where you are, on weather panels you set to Current Location. It stays on this device.
         NSBonjourServices:
           - _statusboard._tcp
         NSAppTransportSecurity:
@@ -312,6 +323,7 @@ targets:
         # Status Board only ever reads (HealthSource requests toShare: []).
         NSHealthUpdateUsageDescription: Status Board only reads health data to display it. It never saves anything to Health.
         NSLocalNetworkUsageDescription: Status Board connects to the bridge on your Mac to receive live dashboard data.
+        NSLocationWhenInUseUsageDescription: Status Board uses your location only to show the weather where you are, on weather panels you set to Current Location. It stays on this device.
         NSBonjourServices:
           - _statusboard._tcp
         NSAppTransportSecurity:

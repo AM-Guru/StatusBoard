@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import SwiftUI
 import Testing
 @testable import StatusBoardKit
 
@@ -155,6 +156,175 @@ import Testing
         #expect(items[0].title == "Atom Entry")
         #expect(items[0].link == "https://example.com/a")
     }
+
+    /// The channel's own title, site link and artwork name and illustrate the
+    /// feed in a merged panel — and must not be confused with an item's.
+    @Test func parsesChannelMetadata() {
+        let xml = """
+        <?xml version="1.0"?>
+        <rss version="2.0"><channel>
+        <title>Example News</title><link>https://example.com/</link>
+        <image><url>https://example.com/logo.png</url><title>Logo</title>
+        <link>https://example.com/logo</link></image>
+        <item><title>Story</title><link>https://example.com/1</link></item>
+        </channel></rss>
+        """
+        let feed = FeedParser.parseFeed(data: Data(xml.utf8))
+        #expect(feed.title == "Example News")
+        #expect(feed.siteLink?.absoluteString == "https://example.com/")
+        #expect(feed.iconURL?.absoluteString == "https://example.com/logo.png")
+        #expect(feed.items.count == 1)
+    }
+
+    @Test func parsesAtomIconAndSiteLink() {
+        let xml = """
+        <?xml version="1.0"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+        <title>Atom Site</title>
+        <link href="https://atom.example.com/" rel="alternate"/>
+        <icon>https://atom.example.com/icon.png</icon>
+        <entry><title>E</title><link href="https://atom.example.com/e"/></entry>
+        </feed>
+        """
+        let feed = FeedParser.parseFeed(data: Data(xml.utf8))
+        #expect(feed.title == "Atom Site")
+        #expect(feed.siteLink?.absoluteString == "https://atom.example.com/")
+        #expect(feed.iconURL?.absoluteString == "https://atom.example.com/icon.png")
+    }
+}
+
+@Suite struct FeedMergeTests {
+    private func item(_ title: String, minutesAgo: Int?, link: String? = nil) -> FeedItem {
+        FeedItem(title: title,
+                 link: link ?? "https://example.com/\(title)",
+                 published: minutesAgo.map { Date(timeIntervalSince1970: 1_800_000_000 - Double($0) * 60) })
+    }
+
+    @Test func interleavesSourcesNewestFirst() {
+        let merged = FeedParser.merge([
+            (index: 0, feed: [item("a1", minutesAgo: 10), item("a2", minutesAgo: 50)]),
+            (index: 1, feed: [item("b1", minutesAgo: 30), item("b2", minutesAgo: 90)]),
+        ])
+        #expect(merged.map(\.title) == ["a1", "b1", "a2", "b2"])
+    }
+
+    /// Undated items still have to appear — just below everything timestamped.
+    @Test func undatedItemsSinkToTheBottom() {
+        let merged = FeedParser.merge([
+            (index: 0, feed: [item("undated", minutesAgo: nil)]),
+            (index: 1, feed: [item("dated", minutesAgo: 500)]),
+        ])
+        #expect(merged.map(\.title) == ["dated", "undated"])
+    }
+
+    @Test func dropsTheSameStorySyndicatedTwice() {
+        let merged = FeedParser.merge([
+            (index: 0, feed: [item("original", minutesAgo: 10, link: "https://news.example.com/story")]),
+            (index: 1, feed: [item("copy", minutesAgo: 20,
+                                   link: "https://news.example.com/story/?utm_source=feed")]),
+        ])
+        #expect(merged.map(\.title) == ["original"])
+    }
+
+    /// Some sites identify an article only by a query parameter — Apple
+    /// Developer News is `/news/?id=…` — so those must stay distinct.
+    @Test func keepsArticlesThatDifferOnlyInTheirQuery() {
+        let merged = FeedParser.merge([
+            (index: 0, feed: [
+                item("first", minutesAgo: 10, link: "https://developer.apple.com/news/?id=aaa"),
+                item("second", minutesAgo: 20, link: "https://developer.apple.com/news/?id=bbb"),
+            ]),
+        ])
+        #expect(merged.map(\.title) == ["first", "second"])
+    }
+
+    @Test func mergesAcrossSchemeAndHostVariants() {
+        #expect(FeedParser.dedupeKey("http://www.example.com/story/#top")
+                == FeedParser.dedupeKey("https://example.com/story"))
+    }
+
+    @Test func keepsAtMostTheMergedLimit() {
+        let many = (0..<80).map { item("i\($0)", minutesAgo: $0) }
+        #expect(FeedParser.merge([(index: 0, feed: many)]).count == FeedParser.mergedLimit)
+    }
+
+    @Test func namesAFeedFromItsOwnTitleWhenUnlabelled() {
+        let source = FeedSource(url: "https://feeds.example.com/rss")
+        #expect(FeedParser.displayName(for: source) == "feeds.example.com")
+        #expect(FeedParser.displayName(for: source, feed: ParsedFeed(title: "Example News")) == "Example News")
+        var named = source
+        named.name = "My News"
+        #expect(FeedParser.displayName(for: named, feed: ParsedFeed(title: "Example News")) == "My News")
+    }
+}
+
+@Suite struct FeedSourceSettingsTests {
+    /// A panel saved before multi-feed support keeps working, and its single
+    /// URL becomes the first editable row.
+    @Test func legacyURLActsAsASingleSource() {
+        var settings = PanelSettings()
+        settings.url = "https://example.com/rss"
+        #expect(settings.activeFeedSources.map(\.url) == ["https://example.com/rss"])
+        settings.migrateFeedSourcesIfNeeded()
+        #expect(settings.feedSources.count == 1)
+        #expect(settings.feedSources[0].url == "https://example.com/rss")
+        // Migration is idempotent.
+        settings.migrateFeedSourcesIfNeeded()
+        #expect(settings.feedSources.count == 1)
+    }
+
+    @Test func configuredSourcesWinOverTheLegacyURL() {
+        var settings = PanelSettings()
+        settings.url = "https://old.example.com/rss"
+        settings.feedSources = [
+            FeedSource(url: "https://a.example.com/rss"),
+            FeedSource(name: "Muted", url: "https://b.example.com/rss", isEnabled: false),
+            FeedSource(url: "   "),
+        ]
+        #expect(settings.activeFeedSources.map(\.url) == ["https://a.example.com/rss"])
+    }
+
+    @Test func decodesSettingsSavedBeforeMultiFeed() throws {
+        let legacy = """
+        {"refreshSeconds":300,"url":"https://example.com/rss","listDisplay":"list"}
+        """
+        let settings = try JSONDecoder().decode(PanelSettings.self, from: Data(legacy.utf8))
+        #expect(settings.feedSources.isEmpty)
+        #expect(settings.feedShowsSourceIcons)
+        #expect(settings.activeFeedSources.count == 1)
+    }
+
+    /// Snapshots cached by an older build have no source fields on their items.
+    @Test func decodesFeedItemsSavedBeforeSourceTagging() throws {
+        let legacy = """
+        {"id":"1","title":"Story","link":"https://www.example.com/a"}
+        """
+        let item = try JSONDecoder().decode(FeedItem.self, from: Data(legacy.utf8))
+        #expect(item.sourceName == nil)
+        #expect(item.sourceIcon == nil)
+        #expect(item.linkHost == "example.com")
+    }
+}
+
+@Suite struct FaviconProviderTests {
+    @Test func readsLinkTagAttributesInAnyQuotingStyle() {
+        #expect(FaviconProvider.attribute("href", in: "<link rel=icon href='/a.png'>") == "/a.png")
+        #expect(FaviconProvider.attribute("rel", in: "<link href=\"/a.png\" REL=\"shortcut icon\">")
+                == "shortcut icon")
+        #expect(FaviconProvider.attribute("sizes", in: "<link rel=icon sizes=32x32 href=/a.png>") == "32x32")
+        #expect(FaviconProvider.attribute("href", in: "<link rel=icon>") == nil)
+    }
+
+    /// Whatever a site serves — here a 1×1 PNG — comes back as decodable PNG
+    /// bytes, and anything that isn't an image is rejected rather than stored.
+    @Test func normalizesImagesAndRejectsJunk() throws {
+        let onePixelPNG = Data(base64Encoded: """
+        iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+        """)!
+        let normalized = try #require(FaviconProvider.normalize(onePixelPNG))
+        #expect(normalized.starts(with: [0x89, 0x50, 0x4E, 0x47]))
+        #expect(FaviconProvider.normalize(Data("<!doctype html><html></html>".utf8)) == nil)
+    }
 }
 
 @Suite struct SettingsCompatibilityTests {
@@ -238,11 +408,18 @@ import Testing
     }
 
     @Test func statusTokensColorCorrectly() {
-        #expect(TableContentView.statusColor(for: " Success ") == SBTheme.good)
-        #expect(TableContentView.statusColor(for: "DEGRADED") == SBTheme.warn)
-        #expect(TableContentView.statusColor(for: "failed") == SBTheme.bad)
-        #expect(TableContentView.statusColor(for: "building") == SBTheme.secondaryAccent)
-        #expect(TableContentView.statusColor(for: "hello") == nil)
+        // Status words resolve against the panel's own style, so a light
+        // theme gets readable greens and ambers rather than the dark-panel set.
+        let style = SBPanelStyle.board
+        #expect(TableContentView.statusColor(for: " Success ", in: style) == style.good)
+        #expect(TableContentView.statusColor(for: "DEGRADED", in: style) == style.warn)
+        #expect(TableContentView.statusColor(for: "failed", in: style) == style.bad)
+        #expect(TableContentView.statusColor(for: "building", in: style) == SBTheme.secondaryAccent)
+        #expect(TableContentView.statusColor(for: "hello", in: style) == nil)
+
+        let paper = SBPanelStyle(palette: SBThemeName.paper.palette)
+        #expect(TableContentView.statusColor(for: "ok", in: paper) == paper.good)
+        #expect(paper.good != style.good)
     }
 }
 
@@ -804,6 +981,26 @@ import Testing
         #expect(SchoolStyle.alias("Algebra II", in: settings) == "Algebra II")
     }
 
+    @Test func hiddenCoursesDropOutOfTheGradesList() throws {
+        let grades = [CourseGrade(course: "Biology", score: 94),
+                      CourseGrade(course: "Counselor"),
+                      CourseGrade(course: "INDLS")]
+        var settings = PanelSettings()
+        #expect(settings.visibleGrades(grades).count == 3)
+
+        settings.hiddenCourses = ["Counselor", "INDLS"]
+        #expect(settings.visibleGrades(grades).map(\.course) == ["Biology"])
+
+        // The choice has to survive a save, or it un-hides on next launch.
+        let restored = try JSONDecoder().decode(
+            PanelSettings.self, from: JSONEncoder().encode(settings))
+        #expect(restored.hiddenCourses == ["Counselor", "INDLS"])
+        // Settings written before this build simply hide nothing.
+        let legacy = try JSONDecoder().decode(PanelSettings.self, from: Data("{}".utf8))
+        #expect(legacy.hiddenCourses.isEmpty)
+        #expect(legacy.visibleGrades(grades).count == 3)
+    }
+
     @Test func scheduleKnowsLiveAndFinished() {
         let now = Date()
         let live = ScheduledClass(course: "Bio", start: now.addingTimeInterval(-60),
@@ -1121,5 +1318,1127 @@ struct WatchLayoutTests {
 
         #expect(decoded.layout(for: .tv) == original.layout(for: .tv))
         #expect(decoded.panels(for: .tv).count == 1)
+    }
+}
+
+@Suite @MainActor struct DisplayOnlyDeviceTests {
+    /// A store standing in for an Apple TV or Watch: a screen that shows
+    /// boards but never authors them.
+    private func displayOnlyStore(at url: URL) -> DashboardStore {
+        DashboardStore(fileURL: url, authorsBoards: false)
+    }
+
+    private func tempURL() throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sb-tests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("dashboards.json")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        return url
+    }
+
+    /// The bug behind "my Apple TV shows Clock/Weather/Launch/News, none of
+    /// which are on my Mac": the TV made its own starter board, showed it, and
+    /// never switched away from it when the real boards synced down.
+    @Test func aLeftoverLocalBoardIsDroppedAndTheSyncedOneIsShown() throws {
+        let url = try tempURL()
+        // An older build's starter board, saved locally and never in iCloud.
+        SBStorage.write([Dashboard.starter()], to: url)
+
+        let store = displayOnlyStore(at: url)
+        #expect(store.dashboards.isEmpty)
+        #expect(store.selectedDashboardID == nil)
+
+        let real = Dashboard(name: "Operations")
+        store.applyRemote(real)
+        #expect(store.dashboards.map(\.name) == ["Operations"])
+        #expect(store.selectedDashboardID == real.id)   // and it's what's on screen
+    }
+
+    /// The same file on a Mac keeps its board: only display-only devices treat
+    /// the local file as a cache.
+    @Test func aMacKeepsItsOwnBoards() throws {
+        let url = try tempURL()
+        SBStorage.write([Dashboard.starter()], to: url)
+        let store = DashboardStore(fileURL: url, authorsBoards: true)
+        #expect(store.dashboards.count == 1)
+    }
+
+    /// Boards that did come from iCloud must survive a relaunch, so the TV
+    /// still shows something while it's offline.
+    @Test func syncedBoardsAreKeptAcrossLaunches() throws {
+        let url = try tempURL()
+        let store = displayOnlyStore(at: url)
+        let synced = Dashboard(name: "Operations")
+        store.applyRemote(synced)
+        store.saveNow()
+
+        let relaunched = displayOnlyStore(at: url)
+        #expect(relaunched.dashboards.map(\.id) == [synced.id])
+        #expect(relaunched.selectedDashboardID == synced.id)
+    }
+
+    @Test func aBoardDeletedInICloudIsForgotten() throws {
+        let url = try tempURL()
+        let store = displayOnlyStore(at: url)
+        let synced = Dashboard(name: "Operations")
+        store.applyRemote(synced)
+        store.applyRemoteDeletion(id: synced.id)
+        store.saveNow()
+
+        let relaunched = displayOnlyStore(at: url)
+        #expect(relaunched.dashboards.isEmpty)
+    }
+
+    /// An edit made on the Mac must replace what the TV is already showing,
+    /// rather than arriving as a second board.
+    @Test func anEditedBoardReplacesTheCopyOnScreen() throws {
+        let url = try tempURL()
+        let store = displayOnlyStore(at: url)
+        var board = Dashboard(name: "Operations")
+        board.panels = [Panel(kind: .clock, title: "Clock",
+                              frame: GridRect(x: 0, y: 0, width: 2, height: 1))]
+        store.applyRemote(board)
+
+        var edited = board
+        edited.panels.append(Panel(kind: .text, title: "Grades",
+                                   frame: GridRect(x: 2, y: 0, width: 2, height: 1)))
+        edited.modifiedAt = board.modifiedAt.addingTimeInterval(60)
+        store.applyRemote(edited)
+
+        #expect(store.dashboards.count == 1)
+        #expect(store.dashboards[0].panels.map(\.title) == ["Clock", "Grades"])
+    }
+}
+
+@Suite("K12 session cookies")
+struct SessionCookieJarTests {
+    private func cookie(_ name: String, _ value: String = "v",
+                        domain: String = "home.k12.com", path: String = "/",
+                        secure: Bool = true, expires: Date? = nil) -> HTTPCookie {
+        var properties: [HTTPCookiePropertyKey: Any] = [
+            .name: name, .value: value, .domain: domain, .path: path,
+        ]
+        if secure { properties[.secure] = "TRUE" }
+        if let expires { properties[.expires] = expires }
+        return HTTPCookie(properties: properties)!
+    }
+
+    private let api = URL(string: "https://home.k12.com/api/canvas/events/classes")!
+
+    /// The bug this whole jar exists for. `HTTPCookieStorage()` looks like a
+    /// private cookie store and is not: it drops every `setCookie` on the
+    /// floor and reads back `nil`. The K12 sheet counted the cookies it handed
+    /// over, so it reported a successful sign-in, saved an empty list to the
+    /// Keychain, and then sent every request with no session at all — which
+    /// came back 401 as "your K12 sign-in expired", forever.
+    @Test func aDetachedHTTPCookieStorageKeepsNothing() {
+        let storage = HTTPCookieStorage()
+        storage.setCookie(cookie("SESSION"))
+        #expect(storage.cookies(for: api)?.isEmpty != false)
+
+        var jar = SessionCookieJar()
+        jar.absorb([cookie("SESSION")])
+        #expect(jar.matching(api).map(\.name) == ["SESSION"])
+        #expect(jar.header(for: api)?.contains("SESSION=v") == true)
+    }
+
+    @Test func cookiesAreSentOnlyToHostsAndPathsThatMatch() {
+        var jar = SessionCookieJar()
+        jar.absorb([
+            cookie("wide", domain: ".k12.com"),
+            cookie("exact", domain: "home.k12.com"),
+            cookie("elsewhere", domain: "example.com"),
+            cookie("scoped", domain: "home.k12.com", path: "/api"),
+            cookie("deeper", domain: "home.k12.com", path: "/api/other"),
+        ])
+        #expect(jar.matching(api).map(\.name).sorted() == ["exact", "scoped", "wide"])
+    }
+
+    /// "/api" must cover "/api/v1" but not "/apixyz".
+    @Test func pathPrefixesStopAtASegmentBoundary() {
+        #expect(SessionCookieJar.pathMatches(requestPath: "/api/v1", cookiePath: "/api"))
+        #expect(!SessionCookieJar.pathMatches(requestPath: "/apixyz", cookiePath: "/api"))
+        #expect(SessionCookieJar.pathMatches(requestPath: "/anything", cookiePath: "/"))
+    }
+
+    @Test func secureCookiesNeverTravelOverPlainHTTP() {
+        var jar = SessionCookieJar()
+        jar.absorb([cookie("SESSION", secure: true)])
+        #expect(jar.matching(URL(string: "http://home.k12.com/api")!).isEmpty)
+    }
+
+    @Test func expiredCookiesAreNeitherSentNorKept() {
+        var jar = SessionCookieJar()
+        jar.absorb([cookie("stale", expires: Date().addingTimeInterval(-60))])
+        #expect(jar.isEmpty)
+
+        jar.absorb([cookie("live", expires: Date().addingTimeInterval(3600))])
+        #expect(jar.matching(api).map(\.name) == ["live"])
+    }
+
+    /// A refreshed session cookie has to replace the old one, not sit beside it.
+    @Test func aRefreshedCookieReplacesTheOneItSupersedes() {
+        var jar = SessionCookieJar()
+        let stored = jar.absorb([cookie("SESSION", "first")])
+        let repeated = jar.absorb([cookie("SESSION", "first")])
+        let refreshed = jar.absorb([cookie("SESSION", "second")])
+        #expect(stored)
+        #expect(!repeated)   // unchanged, so no Keychain write
+        #expect(refreshed)
+        #expect(jar.cookies.count == 1)
+        #expect(jar.header(for: api) == "SESSION=second")
+    }
+
+    /// Expiry used to be written out as an ISO string, which `HTTPCookie`
+    /// silently refuses on the way back in.
+    @Test func persistenceKeepsDomainPathSecureAndExpiry() {
+        let expires = Date().addingTimeInterval(3600)
+        var jar = SessionCookieJar()
+        jar.absorb([cookie("SESSION", "abc", path: "/api", expires: expires)])
+
+        let restored = SessionCookieJar.restored(from: jar.persistable)
+        let cookie = try! #require(restored.cookies.first)
+        #expect(cookie.name == "SESSION")
+        #expect(cookie.value == "abc")
+        #expect(cookie.domain == "home.k12.com")
+        #expect(cookie.path == "/api")
+        #expect(cookie.isSecure)
+        #expect(abs((cookie.expiresDate ?? .distantPast).timeIntervalSince(expires)) < 1)
+        #expect(restored.matching(api).map(\.name) == ["SESSION"])
+    }
+
+    @Test func aCookieThatExpiredWhileTheAppWasClosedIsNotRestored() {
+        var jar = SessionCookieJar()
+        jar.absorb([cookie("SESSION", expires: Date().addingTimeInterval(60))])
+        let entries = jar.persistable
+        let later = Date().addingTimeInterval(120)
+        #expect(SessionCookieJar.restored(from: entries, now: later).isEmpty)
+    }
+
+    /// The sign-in sheet adopts by registrable domain, so the SSO hop through
+    /// security-gateway.k12.com is kept and the rest of the browser is not.
+    @Test func adoptionScopeCoversTheWholePortalDomain() {
+        #expect(SessionCookieJar.registrableDomain(of: "https://home.k12.com") == "k12.com")
+        #expect(SessionCookieJar.registrableDomain(of: "learn2.k12.com") == "k12.com")
+        #expect(SessionCookieJar.registrableDomain(of: "school.instructure.com") == "instructure.com")
+        #expect(SessionCookieJar.domainMatches(host: "security-gateway.k12.com",
+                                               cookieDomain: "k12.com"))
+        #expect(!SessionCookieJar.domainMatches(host: "notk12.com", cookieDomain: "k12.com"))
+    }
+}
+
+@Suite("Shared Canvas credentials")
+@MainActor struct CanvasCredentialsTests {
+    private func canvasPanel(_ kind: PanelKind, host: String? = nil,
+                             token: String? = nil) -> Panel {
+        var panel = Panel(kind: kind, title: kind.displayName,
+                          frame: GridRect(x: 0, y: 0, width: 4, height: 2))
+        var connector = ConnectorConfig()
+        connector.projectURL = host
+        connector.token = token
+        panel.settings.connector = connector
+        return panel
+    }
+
+    private func store(with panels: [Panel]) throws -> DashboardStore {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sb-canvas-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("dashboards.json")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let store = DashboardStore(fileURL: url, authorsBoards: true)
+        // Drop the starter board, so the board under test is dashboards[0].
+        for existing in store.dashboards { store.delete(id: existing.id) }
+        var board = Dashboard(name: "School")
+        board.panels = panels
+        store.add(board)
+        return store
+    }
+
+    @Test func onlyCanvasBackedPanelsShareCredentials() {
+        #expect(PanelKind.canvas.usesCanvasCredentials)
+        #expect(PanelKind.grades.usesCanvasCredentials)
+        #expect(PanelKind.assignments.usesCanvasCredentials)
+        // The schedule panels sign in through the portal, not a token.
+        #expect(!PanelKind.schedule.usesCanvasCredentials)
+        #expect(!PanelKind.k12schedule.usesCanvasCredentials)
+        #expect(!PanelKind.github.usesCanvasCredentials)
+    }
+
+    /// Signing in on one panel signs in the rest — the whole point.
+    @Test func credentialsReachEveryOtherCanvasPanel() throws {
+        let signedIn = canvasPanel(.grades, host: "learn2.k12.com", token: "tok-1")
+        let store = try store(with: [signedIn,
+                                     canvasPanel(.assignments),
+                                     canvasPanel(.canvas),
+                                     Panel(kind: .clock, title: "Clock",
+                                           frame: GridRect(x: 0, y: 2, width: 2, height: 1))])
+
+        let updated = store.applyCanvasCredentials(host: "learn2.k12.com", token: "tok-1",
+                                                   excluding: signedIn.id)
+        #expect(updated == 2)
+        for panel in store.dashboards[0].panels where panel.kind.usesCanvasCredentials {
+            #expect(panel.settings.connector?.projectURL == "learn2.k12.com")
+            #expect(panel.settings.connector?.token == "tok-1")
+        }
+        // The clock is not a Canvas panel and must be left entirely alone.
+        let clock = store.dashboards[0].panels.first { $0.kind == .clock }
+        #expect(clock?.settings.connector == nil)
+    }
+
+    /// A rotated token used to fix one panel and silently break the others.
+    @Test func rotatingATokenUpdatesPanelsThatHadTheOldOne() throws {
+        let edited = canvasPanel(.grades, host: "learn2.k12.com", token: "tok-2")
+        let store = try store(with: [edited,
+                                     canvasPanel(.assignments, host: "learn2.k12.com",
+                                                 token: "tok-1")])
+        #expect(store.applyCanvasCredentials(host: "learn2.k12.com", token: "tok-2",
+                                             excluding: edited.id) == 1)
+        #expect(store.dashboards[0].panels[1].settings.connector?.token == "tok-2")
+    }
+
+    @Test func aNoOpSweepChangesNothingAndCostsNoUndoStep() throws {
+        let panel = canvasPanel(.grades, host: "learn2.k12.com", token: "tok-1")
+        let store = try store(with: [panel,
+                                     canvasPanel(.canvas, host: "learn2.k12.com",
+                                                 token: "tok-1")])
+        let undoBefore = store.canUndo
+        #expect(store.applyCanvasCredentials(host: "learn2.k12.com", token: "tok-1",
+                                             excluding: panel.id) == 0)
+        #expect(store.canUndo == undoBefore)
+    }
+
+    @Test func defaultsFillOnlyTheFieldsAPanelIsMissing() {
+        let shared = CanvasCredentials.Snapshot(host: "learn2.k12.com", token: "tok-1")
+
+        var empty = ConnectorConfig()
+        CanvasCredentials.fill(&empty, from: shared)
+        #expect(empty.projectURL == "learn2.k12.com")
+        #expect(empty.token == "tok-1")
+
+        // A panel deliberately pointed at another school keeps its own values.
+        var other = ConnectorConfig()
+        other.projectURL = "other.instructure.com"
+        other.token = "tok-other"
+        CanvasCredentials.fill(&other, from: shared)
+        #expect(other.projectURL == "other.instructure.com")
+        #expect(other.token == "tok-other")
+
+        // Whitespace and a stray trailing slash are not a configured value.
+        var blank = ConnectorConfig()
+        blank.projectURL = "  "
+        CanvasCredentials.fill(&blank, from: shared)
+        #expect(blank.projectURL == "learn2.k12.com")
+        #expect(CanvasCredentials.normalized("https://learn2.k12.com/") == "https://learn2.k12.com")
+        #expect(CanvasCredentials.normalized("") == nil)
+    }
+}
+
+// MARK: - Tessie (Tesla)
+
+@Suite struct TessieParsingTests {
+    /// A trimmed copy of Tessie's documented `/{vin}/state` response, with the
+    /// car in drive and navigating.
+    static let drivingState = try! JSONValue.parse("""
+    {
+      "vin": "5YJXCAE43LF123456",
+      "display_name": "Roadrunner",
+      "state": "online",
+      "drive_state": {
+        "power": 42, "speed": 63, "heading": 194,
+        "latitude": 37.4929681, "longitude": -121.9453489,
+        "timestamp": 1643590652755, "shift_state": "D",
+        "active_route_destination": "Empire State Building",
+        "active_route_energy_at_arrival": 41,
+        "active_route_latitude": 40.7484, "active_route_longitude": -73.9857,
+        "active_route_miles_to_arrival": 4.12,
+        "active_route_minutes_to_arrival": 5.43,
+        "active_route_traffic_minutes_delay": 12
+      },
+      "charge_state": {
+        "battery_level": 89, "usable_battery_level": 88, "battery_range": 269.01,
+        "charge_limit_soc": 90, "charging_state": "Disconnected",
+        "charger_power": 0, "minutes_to_full_charge": 0
+      },
+      "climate_state": {
+        "inside_temp": 24.3, "outside_temp": 18.5, "is_climate_on": true,
+        "is_preconditioning": false
+      },
+      "vehicle_state": {
+        "df": 0, "dr": 0, "pf": 1, "pr": 0, "ft": 0, "rt": 0,
+        "fd_window": 0, "fp_window": 0, "rd_window": 1, "rp_window": 0,
+        "locked": true, "odometer": 12345.6, "sentry_mode": false,
+        "sentry_mode_available": true, "is_user_present": true,
+        "car_version": "2022.4 fae2af490933",
+        "smart_summon_available": true,
+        "software_update": {"status": "available", "version": "2022.8", "download_perc": 0},
+        "speed_limit_mode": {"active": true, "current_limit_mph": 84},
+        "tpms_pressure_fl": 2.9, "tpms_pressure_fr": 2.85,
+        "tpms_pressure_rl": 2.95, "tpms_pressure_rr": 2.9
+      },
+      "vehicle_config": {"driver_assist": "TeslaAP3"},
+      "gui_settings": {"gui_distance_units": "mi/hr", "gui_temperature_units": "F"}
+    }
+    """)
+
+    var vehicle: TessieVehicle {
+        TessieSource.parse(state: Self.drivingState, fallbackVIN: "FALLBACK")
+    }
+
+    @Test func flattensTheStateResponse() {
+        let vehicle = vehicle
+        #expect(vehicle.vin == "5YJXCAE43LF123456")
+        #expect(vehicle.name == "Roadrunner")
+        #expect(vehicle.connection == .online)
+        #expect(vehicle.drive.gear == .drive)
+        #expect(vehicle.drive.speedMPH == 63)
+        #expect(vehicle.drive.odometerMiles == 12345.6)
+        #expect(vehicle.battery.level == 89)
+        #expect(vehicle.security.isLocked == true)
+        #expect(vehicle.system.driverAssist == "TeslaAP3")
+        #expect(vehicle.system.tires.count == 4)
+        #expect(vehicle.units.metricDistance == false)
+        #expect(vehicle.units.fahrenheit == true)
+    }
+
+    /// Tesla reports doors and windows as open-angle codes, not booleans, and
+    /// only the non-zero ones are actually ajar.
+    @Test func onlyNonZeroDoorsAndWindowsCountAsOpen() {
+        let vehicle = vehicle
+        #expect(vehicle.security.openings == ["Passenger door"])
+        #expect(vehicle.security.openWindows == ["Driver rear"])
+    }
+
+    /// Speed Limit Mode is the owner's governor. It is read, but it is never
+    /// allowed to masquerade as the posted limit.
+    @Test func speedLimitModeIsReadAsAGovernorNotAPostedLimit() {
+        let vehicle = vehicle
+        #expect(vehicle.drive.governorLimitMPH == 84)
+        #expect(vehicle.drive.postedLimitMPH == nil)
+    }
+
+    @Test func ignoresAnInactiveSpeedLimitMode() throws {
+        let json = try JSONValue.parse("""
+        {"vehicle_state": {"speed_limit_mode": {"active": false, "current_limit_mph": 84}}}
+        """)
+        #expect(TessieSource.parse(state: json, fallbackVIN: "V").drive.governorLimitMPH == nil)
+    }
+
+    @Test func readsTheActiveRoute() throws {
+        let route = try #require(vehicle.route)
+        #expect(route.destination == "Empire State Building")
+        #expect(route.trafficDelayMinutes == 12)
+        #expect(route.energyAtArrival == 41)
+    }
+
+    /// Tesla leaves the whole `active_route_*` family populated with stale
+    /// values after a route ends, so the destination name is what decides
+    /// whether navigation is running at all.
+    @Test func noDestinationNameMeansNoRoute() throws {
+        let json = try JSONValue.parse("""
+        {"drive_state": {"active_route_destination": "",
+                         "active_route_minutes_to_arrival": 5.43}}
+        """)
+        #expect(TessieSource.parse(state: json, fallbackVIN: "V").route == nil)
+    }
+
+    /// Tesla stamps some timestamps in milliseconds and others in seconds.
+    @Test func timestampsAreReadInEitherUnit() throws {
+        let milliseconds = try #require(TessieSource.timestamp(.number(1_643_590_652_000)))
+        let seconds = try #require(TessieSource.timestamp(.number(1_643_590_652)))
+        #expect(milliseconds == seconds)
+        // Sub-second precision survives the millisecond conversion.
+        let fractional = try #require(TessieSource.timestamp(.number(1_643_590_652_755)))
+        #expect(abs(fractional.timeIntervalSince(seconds) - 0.755) < 0.001)
+        #expect(TessieSource.timestamp(.number(0)) == nil)
+        #expect(TessieSource.timestamp(nil) == nil)
+    }
+
+    /// A sleeping car returns almost nothing. The panel must still get a
+    /// vehicle back rather than a decode failure.
+    @Test func aNearlyEmptyStateStillParses() throws {
+        let json = try JSONValue.parse(#"{"state": "asleep"}"#)
+        let vehicle = TessieSource.parse(state: json, fallbackVIN: "5YJ")
+        #expect(vehicle.vin == "5YJ")
+        #expect(vehicle.name == "Tesla")
+        #expect(vehicle.isAsleep)
+        #expect(!vehicle.isDriving)
+        #expect(vehicle.drive.gear == .unknown)
+    }
+
+    /// Firmware adds shift states and charging states over time; one new
+    /// string must not cost the panel its whole snapshot.
+    @Test func unknownEnumeratedValuesDecodeRatherThanThrow() throws {
+        let json = try JSONValue.parse("""
+        {"state": "something_new", "drive_state": {"shift_state": "X"},
+         "charge_state": {"charging_state": "Wireless"}}
+        """)
+        let vehicle = TessieSource.parse(state: json, fallbackVIN: "V")
+        #expect(vehicle.connection == .unknown)
+        #expect(vehicle.drive.gear == .unknown)
+        #expect(vehicle.battery.state == .unknown)
+    }
+
+    /// `/state` carries coordinates but no street address; that lives only
+    /// behind `/location`, and the two have to be folded together.
+    @Test func theLocationResponseFillsInTheAddress() throws {
+        var vehicle = vehicle
+        #expect(vehicle.place.address == nil)
+        let location = try JSONValue.parse("""
+        {"latitude": 1, "longitude": 2,
+         "address": "45500 Fremont Blvd, Fremont, California 94538, United States",
+         "saved_location": "Work"}
+        """)
+        TessieSource.merge(location: location, into: &vehicle)
+        #expect(vehicle.place.savedLocation == "Work")
+        // The fresher coordinates from /state must win.
+        #expect(vehicle.place.latitude == 37.4929681)
+        // A saved name beats the postal address on a panel this size.
+        #expect(vehicle.place.shortDescription == "Work")
+    }
+
+    @Test func aPostalAddressIsTrimmedToStreetAndTown() throws {
+        var vehicle = TessieVehicle(vin: "V", name: "Car")
+        TessieSource.merge(
+            location: try JSONValue.parse("""
+            {"address": "45500 Fremont Blvd, Fremont, California 94538, United States"}
+            """),
+            into: &vehicle)
+        #expect(vehicle.place.shortDescription == "45500 Fremont Blvd, Fremont")
+    }
+
+    /// The second request is only worth making when a panel shows a place.
+    @Test func theAddressIsOnlyFetchedWhenAFieldNeedsIt() {
+        var settings = PanelSettings()
+        settings.tessieParkedFields = [.battery, .lock]
+        settings.tessieDrivingFields = [.speed]
+        #expect(!TessieSource.needsAddress(settings))
+
+        settings.tessieDrivingFields = [.speed, .map]
+        #expect(TessieSource.needsAddress(settings))
+    }
+
+    /// Overpass is a volunteer-run service; a panel that never shows speed
+    /// must never ask it anything.
+    @Test func theSpeedLimitIsOnlyLookedUpWhileDrivingAndOnlyIfShown() {
+        var settings = PanelSettings()
+        settings.tessieDrivingFields = [.battery]
+        #expect(!TessieSource.settingsShowSpeed(settings, isDriving: true))
+
+        settings.tessieDrivingFields = [.speed]
+        #expect(TessieSource.settingsShowSpeed(settings, isDriving: true))
+        #expect(!TessieSource.settingsShowSpeed(settings, isDriving: false))
+    }
+
+    @Test func aRollingCarWithNoGearStillCountsAsDriving() {
+        var vehicle = TessieVehicle(vin: "V", name: "Car")
+        #expect(!vehicle.isDriving)
+        vehicle.drive.speedMPH = 31
+        #expect(vehicle.isDriving)
+        vehicle.drive.gear = .park
+        #expect(!vehicle.isDriving)
+    }
+}
+
+@Suite struct TessieReadoutTests {
+    var driving: TessieVehicle {
+        TessieSource.parse(state: TessieParsingTests.drivingState, fallbackVIN: "V")
+    }
+
+    /// The whole point of the two field lists: the board rearranges itself
+    /// when the car pulls away.
+    @Test func contextFollowsTheCarUnlessItIsPinned() {
+        var settings = PanelSettings()
+        var parked = driving
+        parked.drive.gear = .park
+        parked.drive.speedMPH = 0
+
+        #expect(TessieReadout.context(for: driving, settings: settings) == .driving)
+        #expect(TessieReadout.context(for: parked, settings: settings) == .parked)
+
+        settings.tessieAutoContext = false
+        settings.tessieContext = .driving
+        #expect(TessieReadout.context(for: parked, settings: settings) == .driving)
+
+        // Before any data arrives there is no gear to follow.
+        settings.tessieAutoContext = true
+        #expect(TessieReadout.context(for: nil, settings: settings) == .driving)
+    }
+
+    @Test func eachContextDrawsItsOwnFieldList() {
+        var settings = PanelSettings()
+        settings.tessieParkedFields = [.battery, .lock]
+        settings.tessieDrivingFields = [.speed]
+        #expect(TessieReadout.fields(for: .parked, settings: settings) == [.battery, .lock])
+        #expect(TessieReadout.fields(for: .driving, settings: settings) == [.speed])
+    }
+
+    /// A blank "Navigation —" tile is worse than no tile at all.
+    @Test func fieldsWithNothingToSayAreDroppedNotBlank() {
+        var vehicle = driving
+        vehicle.route = nil
+        let stats = TessieReadout.stats(for: vehicle, fields: [.navigation, .battery])
+        #expect(stats.map(\.field) == [.battery])
+    }
+
+    @Test func speedIsColouredAgainstThePostedLimit() {
+        var vehicle = driving
+        vehicle.drive.speedMPH = 63
+        vehicle.drive.postedLimitMPH = 65
+        #expect(TessieReadout.stat(for: .speed, vehicle: vehicle)?.tone == .good)
+
+        vehicle.drive.postedLimitMPH = 55
+        #expect(TessieReadout.stat(for: .speed, vehicle: vehicle)?.tone == .warn)
+
+        vehicle.drive.postedLimitMPH = 45
+        let over = TessieReadout.stat(for: .speed, vehicle: vehicle)
+        #expect(over?.tone == .bad)
+        #expect(over?.detail?.contains("+18") == true)
+    }
+
+    /// With no posted limit the governor is shown, clearly labelled as a cap
+    /// rather than a limit — it is not the same claim.
+    @Test func theGovernorIsLabelledAsACapNotALimit() {
+        var vehicle = driving
+        vehicle.drive.postedLimitMPH = nil
+        let stat = TessieReadout.stat(for: .speed, vehicle: vehicle)
+        #expect(stat?.detail == "capped at 84 mph")
+        #expect(stat?.tone == .accent)
+    }
+
+    /// Tessie publishes no live Autopilot engagement, so the field reports the
+    /// hardware and never implies the car is steering itself.
+    @Test func driverAssistReportsCapabilityOnly() {
+        let stat = TessieReadout.stat(for: .driverAssist, vehicle: driving)
+        #expect(stat?.value == "Full Self-Driving computer")
+        #expect(stat?.detail?.contains("hardware") == true)
+    }
+
+    @Test func unitsFollowTheCarsOwnScreen() {
+        var vehicle = driving
+        #expect(TessieReadout.speed(63, units: vehicle.units) == "63 mph")
+        #expect(TessieReadout.temperature(24.3, units: vehicle.units) == "76°F")
+
+        vehicle.units = TessieVehicle.Units(metricDistance: true, fahrenheit: false)
+        #expect(TessieReadout.speed(63, units: vehicle.units) == "101 km/h")
+        #expect(TessieReadout.temperature(24.3, units: vehicle.units) == "24°C")
+    }
+
+    /// The arrival clock is anchored to the car's own timestamp; anchoring it
+    /// to "now" would slide the ETA forward on every redraw.
+    @Test func arrivalIsMeasuredFromWhenTheCarReported() throws {
+        let captured = Date(timeIntervalSince1970: 1_700_000_000)
+        var route = TessieVehicle.Route()
+        route.minutesToArrival = 30
+        let arrival = try #require(route.arrival(from: captured))
+        #expect(arrival.timeIntervalSince(captured) == 1800)
+    }
+
+    @Test func batteryToneWarnsBeforeItIsTooLate() {
+        #expect(TessieReadout.batteryTone(80) == .good)
+        #expect(TessieReadout.batteryTone(25) == .warn)
+        #expect(TessieReadout.batteryTone(9) == .bad)
+    }
+}
+
+@Suite struct RoadSpeedLimitTests {
+    /// OpenStreetMap's `maxspeed` is km/h unless a unit is spelled out.
+    @Test func parsesMaxSpeedTags() {
+        #expect(RoadSpeedLimit.parseMaxSpeed("55 mph") == 55)
+        #expect(RoadSpeedLimit.parseMaxSpeed("30mph") == 30)
+        let fifty = try! #require(RoadSpeedLimit.parseMaxSpeed("50"))
+        #expect(abs(fifty - 31.07) < 0.01)
+        #expect(RoadSpeedLimit.parseMaxSpeed("none") == nil)
+        #expect(RoadSpeedLimit.parseMaxSpeed("walk") == nil)
+        #expect(RoadSpeedLimit.parseMaxSpeed("RU:urban") == nil)
+        #expect(RoadSpeedLimit.parseMaxSpeed("0") == nil)
+    }
+
+    @Test func measuresDistanceToAPolylineNotJustItsVertices() {
+        // A segment running due east, 0.001° north of the point. The nearest
+        // vertex is far away along the segment; the segment itself is ~111 m.
+        let distance = RoadSpeedLimit.distanceMeters(
+            fromLatitude: 37.0, longitude: -122.0,
+            toPolyline: [(37.001, -122.01), (37.001, -121.99)])
+        #expect(abs(distance - 111.32) < 1)
+    }
+
+    /// A freeway usually runs alongside a frontage road with a very different
+    /// limit, so "some road nearby" is not good enough — the nearest one wins.
+    @Test func picksTheNearestWayNotTheFirstOne() throws {
+        let json = try JSONValue.parse("""
+        {"elements": [
+          {"type": "way", "tags": {"highway": "motorway", "maxspeed": "65 mph"},
+           "geometry": [{"lat": 37.00030, "lon": -122.001}, {"lat": 37.00030, "lon": -121.999}]},
+          {"type": "way", "tags": {"highway": "service", "maxspeed": "25 mph"},
+           "geometry": [{"lat": 37.00005, "lon": -122.001}, {"lat": 37.00005, "lon": -121.999}]}
+        ]}
+        """)
+        #expect(RoadSpeedLimit.nearestLimit(in: json, latitude: 37.0, longitude: -122.0) == 25)
+    }
+
+    @Test func ignoresWaysBeyondTheSearchRadius() throws {
+        let json = try JSONValue.parse("""
+        {"elements": [
+          {"type": "way", "tags": {"maxspeed": "65 mph"},
+           "geometry": [{"lat": 37.002, "lon": -122.001}, {"lat": 37.002, "lon": -121.999}]}
+        ]}
+        """)
+        #expect(RoadSpeedLimit.nearestLimit(in: json, latitude: 37.0, longitude: -122.0) == nil)
+    }
+
+    @Test func ignoresWaysWithNoUsableLimit() throws {
+        let json = try JSONValue.parse("""
+        {"elements": [
+          {"type": "way", "tags": {"maxspeed": "none"},
+           "geometry": [{"lat": 37.00005, "lon": -122.0}]}
+        ]}
+        """)
+        #expect(RoadSpeedLimit.nearestLimit(in: json, latitude: 37.0, longitude: -122.0) == nil)
+    }
+}
+
+@MainActor
+@Suite struct TessieSettingsTests {
+    /// A board edited on a newer build may carry a field this one has never
+    /// heard of. Dropping just that field keeps the rest of the user's layout.
+    @Test func anUnknownFieldIsDroppedWithoutResettingTheList() throws {
+        let json = """
+        {"tessieParkedFields": ["battery", "warpDrive", "lock"],
+         "tessieDrivingFields": ["speed"],
+         "tessieAutoContext": false, "tessieContext": "driving"}
+        """
+        let settings = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        #expect(settings.tessieParkedFields == [.battery, .lock])
+        #expect(settings.tessieDrivingFields == [.speed])
+        #expect(settings.tessieAutoContext == false)
+        #expect(settings.tessieContext == .driving)
+    }
+
+    /// Panels saved before this feature existed must still open, on the
+    /// sensible defaults.
+    @Test func settingsFromBeforeTheTeslaPanelStillLoad() throws {
+        let settings = try JSONDecoder().decode(PanelSettings.self,
+                                                from: Data(#"{"refreshSeconds": 60}"#.utf8))
+        #expect(settings.tessieParkedFields == TessieField.defaultParked)
+        #expect(settings.tessieDrivingFields == TessieField.defaultDriving)
+        #expect(settings.tessieAutoContext)
+    }
+
+    @Test func aRoundTripKeepsEveryField() throws {
+        var settings = PanelSettings()
+        settings.tessieParkedFields = [.map, .sentry]
+        settings.tessieDrivingFields = [.speed, .arrival]
+        settings.tessieAutoContext = false
+        settings.tessieContext = .driving
+        let data = try JSONEncoder().encode(settings)
+        #expect(try JSONDecoder().decode(PanelSettings.self, from: data) == settings)
+    }
+
+    /// A car's state changes by the minute; five is far too coarse.
+    @Test func teslaPanelsRefreshFasterThanTheDefault() {
+        #expect(PanelKind.tessie.defaultRefreshSeconds == 60)
+        #expect(PanelKind.clock.defaultRefreshSeconds == 300)
+    }
+
+    /// One Tessie key covers a whole account, so rotating it must not leave
+    /// half the board signed out — but the VIN is per-panel and stays put.
+    @Test func sharingTheKeyLeavesEachPanelsVinAlone() throws {
+        func teslaPanel(vin: String, key: String) -> Panel {
+            var panel = Panel(kind: .tessie, title: "Car", frame: GridRect(x: 0, y: 0, width: 2, height: 1))
+            var connector = ConnectorConfig()
+            connector.token = key
+            connector.query = vin
+            panel.settings.connector = connector
+            return panel
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sb-tessie-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("dashboards.json")
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
+        let store = DashboardStore(fileURL: url, authorsBoards: true)
+        // Drop the starter board, so the board under test is dashboards[0].
+        for existing in store.dashboards { store.delete(id: existing.id) }
+
+        let edited = teslaPanel(vin: "VIN-A", key: "new-key")
+        var board = Dashboard(name: "Cars")
+        board.panels = [edited, teslaPanel(vin: "VIN-B", key: "old-key")]
+        store.add(board)
+
+        #expect(store.applyTessieCredentials(apiKey: "new-key", excluding: edited.id) == 1)
+        #expect(store.dashboards[0].panels[1].settings.connector?.token == "new-key")
+        #expect(store.dashboards[0].panels[1].settings.connector?.query == "VIN-B")
+    }
+
+    @Test func sharedDefaultsFillOnlyWhatAPanelIsMissing() {
+        let shared = TessieCredentials.Snapshot(apiKey: "key-1", defaultVIN: "VIN-A")
+
+        var empty = ConnectorConfig()
+        TessieCredentials.fill(&empty, from: shared)
+        #expect(empty.token == "key-1")
+        #expect(empty.query == "VIN-A")
+
+        // A panel deliberately pointed at the other car keeps its own VIN.
+        var other = ConnectorConfig()
+        other.query = "VIN-B"
+        TessieCredentials.fill(&other, from: shared)
+        #expect(other.token == "key-1")
+        #expect(other.query == "VIN-B")
+    }
+}
+
+// MARK: - Appearance
+
+@Suite struct PanelAppearanceTests {
+    /// The whole point of the hand-written decoding: a board written before
+    /// appearances existed must still load, with everything at its default.
+    @Test func settingsWithoutAnAppearanceStillDecode() throws {
+        let legacy = """
+        {"refreshSeconds": 60, "locationName": "Cupertino", "latitude": 37.3, "longitude": -122.0}
+        """
+        let settings = try JSONDecoder().decode(PanelSettings.self, from: Data(legacy.utf8))
+        #expect(settings.appearance.isDefault)
+        #expect(settings.appearance.theme == .board)
+        #expect(settings.appearance.dynamic == .automatic)
+        #expect(settings.weatherLocationMode == .coordinates)
+        #expect(settings.weatherUnits == .automatic)
+        #expect(settings.locationName == "Cupertino")
+    }
+
+    @Test func boardWithoutAnAppearanceStillDecodes() throws {
+        let board = Dashboard(name: "Legacy")
+        var json = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(board)) as! [String: Any]
+        json.removeValue(forKey: "appearance")
+        let stripped = try JSONSerialization.data(withJSONObject: json)
+        let decoded = try JSONDecoder().decode(Dashboard.self, from: stripped)
+        #expect(decoded.appearance.isDefault)
+        #expect(decoded.name == "Legacy")
+    }
+
+    @Test func appearanceSurvivesARoundTrip() throws {
+        var appearance = PanelAppearance()
+        appearance.theme = .glass
+        appearance.backgroundStyle = .boardBackdrop
+        appearance.material = .thin
+        appearance.backgroundOpacity = 0.25
+        appearance.glowRadius = 8
+        appearance.dynamic = .weather
+        var settings = PanelSettings()
+        settings.appearance = appearance
+
+        let decoded = try JSONDecoder().decode(
+            PanelSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded.appearance == appearance)
+        #expect(!decoded.appearance.isDefault)
+    }
+
+    /// A panel left on the default theme follows the board; one that has
+    /// chosen its own keeps it, and an explicit accent beats a dynamic tint.
+    @Test func boardThemeReachesPanelsUnlessTheyOverrideIt() {
+        var board = BoardAppearance()
+        board.theme = .paper
+
+        let plain = Panel(kind: .text, title: "A", frame: GridRect(x: 0, y: 0, width: 1, height: 1))
+        #expect(SBPanelStyle.themeName(panel: plain, board: board) == .paper)
+        #expect(SBPanelStyle.resolve(panel: plain, board: board).isLight)
+
+        var opinionated = plain
+        opinionated.settings.appearance.theme = .terminal
+        #expect(SBPanelStyle.themeName(panel: opinionated, board: board) == .terminal)
+
+        board.appliesThemeToPanels = false
+        #expect(SBPanelStyle.themeName(panel: plain, board: board) == .board)
+    }
+
+    @Test func lightThemesDarkenTheSemanticColors() {
+        let dark = SBPanelStyle(palette: SBThemeName.board.palette)
+        let light = SBPanelStyle(palette: SBThemeName.paper.palette)
+        #expect(!dark.isLight)
+        #expect(light.isLight)
+        // The stock amber is unreadable on white, so a light theme must not
+        // simply reuse it.
+        #expect(light.warn != dark.warn)
+    }
+
+    /// Wallpapers and masked backdrops are drawn independently in every panel
+    /// that shows them, so the noise they are built from has to be stable.
+    @Test func backdropNoiseIsDeterministic() {
+        #expect(sbNoise(7, 11) == sbNoise(7, 11))
+        #expect(sbNoise(7, 11) != sbNoise(8, 11))
+        for index in 0..<200 {
+            let value = sbNoise(index, 3)
+            #expect(value >= 0 && value < 1)
+        }
+    }
+
+    @Test func gradientAnglesStayInsideTheUnitSquare() {
+        for degrees in stride(from: 0.0, through: 360.0, by: 15) {
+            let point = SBGradientFill.unitPoint(for: degrees)
+            #expect(point.x >= 0 && point.x <= 1)
+            #expect(point.y >= 0 && point.y <= 1)
+        }
+    }
+}
+
+@Suite struct DynamicAppearanceTests {
+    private func panel(_ kind: PanelKind = .status,
+                       configure: (inout PanelSettings) -> Void = { _ in }) -> Panel {
+        var settings = PanelSettings()
+        configure(&settings)
+        return Panel(kind: kind, title: "T",
+                     frame: GridRect(x: 0, y: 0, width: 1, height: 1), settings: settings)
+    }
+
+    @Test func weatherCodesMapToScenes() {
+        #expect(WeatherScene.forCode(0) == .clear)
+        #expect(WeatherScene.forCode(2) == .partlyCloudy)
+        #expect(WeatherScene.forCode(3) == .overcast)
+        #expect(WeatherScene.forCode(48) == .fog)
+        #expect(WeatherScene.forCode(55) == .drizzle)
+        #expect(WeatherScene.forCode(65) == .rain)
+        #expect(WeatherScene.forCode(81) == .rain)
+        #expect(WeatherScene.forCode(73) == .snow)
+        #expect(WeatherScene.forCode(96) == .thunder)
+    }
+
+    @Test func automaticGivesAWeatherPanelASky() {
+        let report = WeatherReport(locationName: "Home", temperatureC: 12,
+                                   symbolName: "cloud.rain.fill",
+                                   conditionDescription: "Rain", windKPH: 9, days: [],
+                                   code: 63, isDaytime: false)
+        let resolved = SBDynamicResolver.resolve(panel: panel(.weather),
+                                                 snapshot: .weather(report),
+                                                 style: .board)
+        #expect(resolved.backdrop == .weather(report))
+        #expect(resolved.tint == nil)
+    }
+
+    @Test func serviceStateColorsThePanel() {
+        let style = SBPanelStyle.board
+        func resolve(_ states: [ServiceStatus.State]) -> Color? {
+            let statuses = states.enumerated().map {
+                ServiceStatus(id: "\($0.offset)", name: "S", state: $0.element)
+            }
+            return SBDynamicResolver.resolve(panel: panel(), snapshot: .statuses(statuses),
+                                             style: style).tint
+        }
+        #expect(resolve([.up, .up]) == style.good)
+        #expect(resolve([.up, .degraded]) == style.warn)
+        #expect(resolve([.degraded, .down]) == style.bad)
+        // Nothing to say about an empty check, so nothing is drawn.
+        #expect(resolve([]) == nil)
+    }
+
+    @Test func thresholdColoringFollowsTheAlertLimits() {
+        let style = SBPanelStyle.board
+        let hot = panel(.graph) { $0.alertAbove = 100; $0.appearance.dynamic = .threshold }
+        func tint(_ value: Double) -> Color? {
+            SBDynamicResolver.resolve(panel: hot, snapshot: .number(value, unit: nil),
+                                      style: style).tint
+        }
+        #expect(tint(10) == style.good)
+        // Within ten percent of the limit is the warning band.
+        #expect(tint(95) == style.warn)
+        #expect(tint(120) == style.bad)
+    }
+
+    @Test func offMeansOff() {
+        let quiet = panel(.status) { $0.appearance.dynamic = .off }
+        let statuses = [ServiceStatus(name: "S", state: .down)]
+        let resolved = SBDynamicResolver.resolve(panel: quiet, snapshot: .statuses(statuses),
+                                                 style: .board)
+        #expect(resolved.backdrop == .none)
+        #expect(resolved.tint == nil)
+    }
+
+    @Test func skyColorsChangeThroughTheDay() {
+        let night = SBTimeOfDayBackdrop.colors(forHour: 2)
+        let noon = SBTimeOfDayBackdrop.colors(forHour: 13)
+        let dusk = SBTimeOfDayBackdrop.colors(forHour: 18)
+        #expect(night != noon)
+        #expect(noon != dusk)
+        #expect(SBTimeOfDayBackdrop.colors(forHour: 23) == night)
+    }
+}
+
+// MARK: - Weather sources
+
+@Suite struct WeatherReportDecodingTests {
+    /// Snapshots cached by an older build have no condition code and no
+    /// daylight flag. Losing them would blank every weather panel until the
+    /// next refresh, so they decode with sensible defaults instead.
+    @Test func olderSnapshotsStillDecode() throws {
+        let legacy = """
+        {"locationName":"Ithaca","temperatureC":4.5,"symbolName":"cloud.fill",
+         "conditionDescription":"Overcast","windKPH":11,"days":[]}
+        """
+        let report = try JSONDecoder().decode(WeatherReport.self, from: Data(legacy.utf8))
+        #expect(report.code == -1)
+        #expect(report.isDaytime)
+        #expect(report.humidity == nil)
+        #expect(report.locationName == "Ithaca")
+    }
+
+    @Test func nightSymbolsUseTheMoon() {
+        #expect(WeatherSource.symbol(for: 0, isDaytime: true) == "sun.max.fill")
+        #expect(WeatherSource.symbol(for: 0, isDaytime: false) == "moon.stars.fill")
+        #expect(WeatherSource.symbol(for: 2, isDaytime: false) == "cloud.moon.fill")
+        // Rain looks the same at midnight.
+        #expect(WeatherSource.symbol(for: 63, isDaytime: false) == "cloud.rain.fill")
+    }
+}
+
+@Suite struct StationWeatherTests {
+    @Test func conditionTextMapsOntoWeatherCodes() {
+        #expect(WeatherScene.forCode(StationWeatherSource.code(forText: "Thunderstorm")) == .thunder)
+        #expect(WeatherScene.forCode(StationWeatherSource.code(forText: "Light Snow")) == .snow)
+        #expect(WeatherScene.forCode(StationWeatherSource.code(forText: "Heavy Rain")) == .rain)
+        #expect(WeatherScene.forCode(StationWeatherSource.code(forText: "Fog/Mist")) == .fog)
+        #expect(WeatherScene.forCode(StationWeatherSource.code(forText: "Overcast")) == .overcast)
+        #expect(WeatherScene.forCode(StationWeatherSource.code(forText: "Fair")) == .clear)
+        #expect(WeatherScene.forCode(StationWeatherSource.code(forText: "Partly Cloudy")) == .partlyCloudy)
+    }
+
+    @Test func metarCloudLayersBecomeWords() {
+        func layers(_ covers: [String]) -> [JSONValue] {
+            covers.map { .object(["cover": .string($0)]) }
+        }
+        #expect(StationWeatherSource.cloudDescription(nil) == "Clear")
+        #expect(StationWeatherSource.cloudDescription(layers(["FEW"])) == "Few Clouds")
+        #expect(StationWeatherSource.cloudDescription(layers(["SCT", "BKN"])) == "Mostly Cloudy")
+        #expect(StationWeatherSource.cloudDescription(layers(["OVC"])) == "Overcast")
+    }
+
+    @Test func humidityComesFromTheDewPoint() {
+        // Dew point equal to the temperature is saturated air.
+        #expect(abs(StationWeatherSource.relativeHumidity(temperature: 10, dewPoint: 10) - 100) < 0.01)
+        let dry = StationWeatherSource.relativeHumidity(temperature: 30, dewPoint: 5)
+        #expect(dry > 15 && dry < 30)
+    }
+}
+
+@Suite struct PersonalWeatherStationTests {
+    private func settings(_ format: PersonalWeatherFormat,
+                          paths: [String: String] = [:]) -> PanelSettings {
+        var settings = PanelSettings()
+        settings.weatherPersonalURL = "http://192.168.1.50/data"
+        settings.weatherPersonalFormat = format
+        settings.weatherPersonalPaths = paths
+        return settings
+    }
+
+    @Test func ecowittFahrenheitBecomesCelsius() throws {
+        let json = try JSONValue.parse("""
+        {"stationtype":"GW1100A","tempf":68.0,"humidity":55,"windspeedmph":10.0}
+        """)
+        let reading = try PersonalWeatherSource.reading(from: json, settings: settings(.automatic))
+        #expect(abs(reading.temperatureC - 20) < 0.01)
+        #expect(reading.humidity == 55)
+        // 10 mph is a little over 16 km/h.
+        #expect(abs((reading.windKPH ?? 0) - 16.09) < 0.05)
+    }
+
+    @Test func weewxCelsiusIsLeftAlone() throws {
+        let json = try JSONValue.parse("""
+        {"current":{"outTemp_C":18.4,"outHumidity":72,"windSpeed_kph":6.5}}
+        """)
+        let reading = try PersonalWeatherSource.reading(from: json, settings: settings(.weewx))
+        #expect(abs(reading.temperatureC - 18.4) < 0.01)
+        #expect(reading.humidity == 72)
+    }
+
+    @Test func homeAssistantEntityIsUnderstood() throws {
+        let json = try JSONValue.parse("""
+        {"entity_id":"weather.home","state":"rainy",
+         "attributes":{"temperature":14.0,"humidity":88,"wind_speed":12.0,
+                       "friendly_name":"Back Garden"}}
+        """)
+        let reading = try PersonalWeatherSource.reading(from: json,
+                                                        settings: settings(.homeAssistant))
+        #expect(abs(reading.temperatureC - 14) < 0.01)
+        #expect(reading.conditionText == "rainy")
+        #expect(reading.stationName == "Back Garden")
+    }
+
+    /// A station nobody has heard of: the reading is buried, but the key names
+    /// are recognisable, so the parser digs it out rather than giving up.
+    @Test func unknownShapesAreSearchedForRecognisableKeys() throws {
+        let json = try JSONValue.parse("""
+        {"sensors":{"outside":{"readings":{"outTemp_C":7.25,"humidity":91}}}}
+        """)
+        let reading = try PersonalWeatherSource.reading(from: json, settings: settings(.automatic))
+        #expect(abs(reading.temperatureC - 7.25) < 0.01)
+        #expect(reading.humidity == 91)
+    }
+
+    @Test func explicitPathsWinAndCustomNeverGuesses() throws {
+        let json = try JSONValue.parse("""
+        {"tempf":68.0,"mine":{"t":3.5}}
+        """)
+        let explicit = try PersonalWeatherSource.reading(
+            from: json, settings: settings(.custom, paths: ["temperature": "mine.t"]))
+        #expect(abs(explicit.temperatureC - 3.5) < 0.01)
+
+        // Custom with no path set has nothing to fall back on, and says so
+        // rather than silently reporting the wrong sensor.
+        #expect(throws: PersonalWeatherSource.PWSError.self) {
+            _ = try PersonalWeatherSource.reading(from: json, settings: settings(.custom))
+        }
+    }
+
+    /// No outdoor station reads 60 °C, so a bare number that high is
+    /// Fahrenheit whatever the key is called.
+    @Test func impossibleCelsiusIsTreatedAsFahrenheit() {
+        #expect(abs(PersonalWeatherSource.celsius(72, key: "temperature") - 22.22) < 0.01)
+        #expect(abs(PersonalWeatherSource.celsius(22, key: "temperature") - 22) < 0.01)
+        #expect(abs(PersonalWeatherSource.celsius(68, key: "tempf") - 20) < 0.01)
+        #expect(abs(PersonalWeatherSource.celsius(20, key: "outTemp_C") - 20) < 0.01)
+    }
+}
+
+@Suite struct WeatherLocationTests {
+    @Test func summariesDescribeEachMode() {
+        var settings = PanelSettings()
+        settings.latitude = 42.44
+        settings.longitude = -76.5
+        #expect(settings.weatherLocationSummary.contains("42.44"))
+
+        settings.weatherLocationMode = .place
+        settings.locationName = "Ithaca"
+        #expect(settings.weatherLocationSummary == "Ithaca")
+
+        settings.weatherLocationMode = .station
+        settings.weatherStationID = "KITH"
+        #expect(settings.weatherLocationSummary.contains("KITH"))
+
+        settings.weatherLocationMode = .current
+        #expect(settings.weatherLocationSummary == "Ithaca")
+    }
+
+    @Test func geocodedPlacesReadBackWithTheirRegion() {
+        let place = GeocodedPlace(name: "Springfield", detail: "Illinois, United States",
+                                  latitude: 39.8, longitude: -89.65)
+        #expect(place.displayName == "Springfield, Illinois, United States")
+        let bare = GeocodedPlace(name: "Home", detail: "", latitude: 1, longitude: 2)
+        #expect(bare.displayName == "Home")
+        // Two geocoders finding the same town should not offer it twice.
+        #expect(place.isRoughly(GeocodedPlace(name: "Springfield, IL", detail: "",
+                                              latitude: 39.803, longitude: -89.652)))
+        #expect(!place.isRoughly(bare))
+    }
+
+    @Test func openMeteoResultsParse() throws {
+        let json = try JSONValue.parse("""
+        {"results":[{"name":"Ithaca","latitude":42.44,"longitude":-76.5,
+                     "admin1":"New York","country":"United States"}]}
+        """)
+        let entry = json["results"]!.arrayValue![0]
+        let place = WeatherGeocoder.place(from: entry)
+        #expect(place?.name == "Ithaca")
+        #expect(place?.detail == "New York, United States")
+        #expect(place?.latitude == 42.44)
     }
 }

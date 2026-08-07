@@ -130,6 +130,8 @@ public final class DataSourceEngine {
             return await ScheduleSource.fetch(settings: panel.settings)
         case .assignments:
             return await AssignmentsSource.fetch(settings: panel.settings)
+        case .tessie:
+            return await TessieSource.fetch(settings: panel.settings)
         case .webClip:
             #if os(tvOS)
             // No WebKit on tvOS — ask the Mac bridge for an offscreen rendering.

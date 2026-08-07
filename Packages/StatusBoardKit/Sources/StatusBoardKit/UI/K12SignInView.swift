@@ -86,29 +86,43 @@ public struct K12SignInView: View {
         isChecking = true
         defer { isChecking = false }
         errorMessage = nil
-        await K12Session.shared.adoptCookies(from: controller.webView.configuration.websiteDataStore)
+        await K12Session.shared.adoptCookies(
+            from: controller.webView.configuration.websiteDataStore, portal: portal)
 
-        // OLS and Canvas answer on different paths, and this sheet is used for
-        // both. Either one proving the session is good is enough.
-        let probes = ["/api/canvas/events/classes", "/api/v1/users/self"]
-        var lastError: Error?
-        for path in probes {
+        // The first probe is the one that suits this host; the rest are
+        // fallbacks. Only the first probe's failure is worth reporting —
+        // reporting the *last* one used to surface an HTML 404 from a path
+        // that never applied to this portal, dressed up as an expired session.
+        var firstError: Error?
+        for path in probePaths {
             do {
                 _ = try await K12Session.shared.json(path: path, portal: portal)
                 onFinish()
                 dismiss()
                 return
             } catch {
-                lastError = error
+                if firstError == nil { firstError = error }
             }
         }
 
-        let reason = (lastError as? LocalizedError)?.errorDescription
-            ?? lastError?.localizedDescription ?? "no response"
+        let reason = (firstError as? LocalizedError)?.errorDescription
+            ?? firstError?.localizedDescription ?? "no response"
         errorMessage = """
             Signed in, but \(portal) did not accept the saved session (\(reason)).
-            Check the portal address above is the one you actually signed in to,             then tap Done again. Your cookies were kept, so nothing is lost.
+            Check the portal address above is the one you actually signed in to, \
+            then tap Done again. Your cookies were kept, so nothing is lost.
+            Session: \(K12Session.shared.diagnosticSummary).
             """
+    }
+
+    /// OLS and Canvas answer on different paths, and this sheet serves both.
+    private var probePaths: [String] {
+        let host = (portal.contains("://") ? URL(string: portal)?.host : portal)?.lowercased()
+            ?? portal.lowercased()
+        let isCanvas = host.contains("instructure.com") || host.hasPrefix("learn")
+        return isCanvas
+            ? ["/api/v1/users/self", "/api/canvas/events/classes"]
+            : ["/api/canvas/events/classes", "/api/v1/users/self"]
     }
 }
 

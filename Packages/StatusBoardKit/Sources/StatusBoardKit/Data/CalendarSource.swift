@@ -11,13 +11,20 @@ public enum CalendarSource {
     private static let store = EKEventStore()
 
     public static func fetch(settings: PanelSettings) async -> DataSnapshot {
+        switch EKEventStore.authorizationStatus(for: .event) {
+        case .denied, .restricted:
+            return .error("Allow calendar access in Settings to show events")
+        default:
+            break
+        }
+
         do {
             let granted = try await store.requestFullAccessToEvents()
             guard granted else {
                 return .error("Allow calendar access in Settings to show events")
             }
         } catch {
-            return .error(error.localizedDescription)
+            return .error(describe(error))
         }
 
         let start = Date()
@@ -40,6 +47,22 @@ public enum CalendarSource {
             return .feed([FeedItem(title: "No events in the next \(days) days")])
         }
         return .feed(Array(items))
+    }
+
+    /// EventKit reports a sandbox denial as a raw Mach send failure, so the
+    /// panel used to read "Mach error 4099 - unknown error code" — which says
+    /// nothing about the actual cause. The connection to the calendar daemon
+    /// was refused because the bundle lacks
+    /// `com.apple.security.personal-information.calendars`; no permission
+    /// dialog is ever shown, so waiting for one or resetting privacy settings
+    /// does nothing.
+    private static func describe(_ error: Error) -> String {
+        let nsError = error as NSError
+        if nsError.domain == NSMachErrorDomain {
+            return "macOS blocked the connection to Calendar. This build isn't "
+                + "entitled to read calendars — install a newer build."
+        }
+        return nsError.localizedDescription
     }
     #else
     public static func fetch(settings: PanelSettings) async -> DataSnapshot {
