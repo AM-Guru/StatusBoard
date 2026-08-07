@@ -24,6 +24,11 @@ public final class BridgeClient {
     /// When true, automatically connect to the first bridge that appears.
     public var autoConnect = true
 
+    /// What this client tells the Mac it is, sent once per connection right
+    /// after the handshake. Nil sends nothing, which is exactly how every
+    /// subscriber behaved before identities existed.
+    public var identity: BridgeClientIdentity?
+
     @ObservationIgnored public var onSnapshot: ((String, SnapshotRecord) -> Void)?
     /// Fired when a subscription reaches the connected state.
     @ObservationIgnored public var onConnect: (() -> Void)?
@@ -39,6 +44,7 @@ public final class BridgeClient {
     @ObservationIgnored private var connection: NWConnection?
     @ObservationIgnored private var buffer = Data()
     @ObservationIgnored private var pendingWebClips: [String: CheckedContinuation<Data?, Never>] = [:]
+    @ObservationIgnored private var pendingK12: [String: CheckedContinuation<DataSnapshot?, Never>] = [:]
     @ObservationIgnored private var reconnectTask: Task<Void, Never>?
 
     public init() {}
@@ -96,6 +102,13 @@ public final class BridgeClient {
                     var handshake = Data(BridgeMessage.subscribeHandshake.utf8)
                     handshake.append(0x0A)
                     connection.send(content: handshake, completion: .contentProcessed { _ in })
+                    // Straight after the handshake, before anything is asked
+                    // for: a Mac that knows what just subscribed can offer to
+                    // arrange that screen, and the console can name it.
+                    if let identity = self.identity,
+                       let line = BridgeMessage.identity(identity).encodedLine() {
+                        connection.send(content: line, completion: .contentProcessed { _ in })
+                    }
                     self.receive(on: connection)
                 case .failed, .cancelled:
                     self.handleDisconnect()
@@ -116,6 +129,10 @@ public final class BridgeClient {
             continuation.resume(returning: nil)
         }
         pendingWebClips.removeAll()
+        for continuation in pendingK12.values {
+            continuation.resume(returning: nil)
+        }
+        pendingK12.removeAll()
     }
 
     private func handleDisconnect() {
@@ -169,7 +186,10 @@ public final class BridgeClient {
         case .webClipResponse(let id, let pngBase64, _):
             let data = pngBase64.flatMap { Data(base64Encoded: $0) }
             pendingWebClips.removeValue(forKey: id)?.resume(returning: data)
-        case .webClipRequest:
+        case .k12Response(let id, let record, let error):
+            pendingK12.removeValue(forKey: id)?
+                .resume(returning: record?.snapshot ?? error.map { .error($0) })
+        case .webClipRequest, .k12Request, .identity:
             break
         }
     }
@@ -187,6 +207,26 @@ public final class BridgeClient {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(30))
                 self?.pendingWebClips.removeValue(forKey: id)?.resume(returning: nil)
+            }
+        }
+    }
+
+    /// Asks the Mac bridge for K12 schedule data (used on tvOS, which has no
+    /// WebKit and so can never sign in to the portal itself).
+    public func requestK12(portal: String, mode: String) async -> DataSnapshot? {
+        guard isConnected, let connection else { return nil }
+        let id = UUID().uuidString
+        let message = BridgeMessage.k12Request(id: id, portal: portal, mode: mode)
+        guard let data = message.encodedLine() else { return nil }
+
+        return await withCheckedContinuation { continuation in
+            pendingK12[id] = continuation
+            connection.send(content: data, completion: .contentProcessed { _ in })
+            Task { @MainActor [weak self] in
+                // Longer than a web clip's: the Mac may have to sign itself
+                // back in before it can answer.
+                try? await Task.sleep(for: .seconds(60))
+                self?.pendingK12.removeValue(forKey: id)?.resume(returning: nil)
             }
         }
     }

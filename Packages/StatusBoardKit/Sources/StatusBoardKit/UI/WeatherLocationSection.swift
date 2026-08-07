@@ -11,6 +11,12 @@ import SwiftUI
 /// been to that screen.
 struct WeatherLocationSection: View {
     @Binding var settings: PanelSettings
+    /// Which ways of choosing a place to offer. A clock's sun faces only need
+    /// coordinates, a place name or this device — reading a METAR station for
+    /// a sunrise would make no sense.
+    var modes: [WeatherLocationMode] = WeatherLocationMode.allCases
+    /// Weather panels pick their temperature units here; other kinds don't.
+    var showsUnits: Bool = true
 
     @State private var searchText = ""
     @State private var results: [GeocodedPlace] = []
@@ -21,7 +27,7 @@ struct WeatherLocationSection: View {
     var body: some View {
         Section("Location") {
             Picker("Look up by", selection: $settings.weatherLocationMode) {
-                ForEach(WeatherLocationMode.allCases) { mode in
+                ForEach(modes) { mode in
                     Label(mode.displayName, systemImage: mode.symbolName).tag(mode)
                 }
             }
@@ -39,13 +45,15 @@ struct WeatherLocationSection: View {
                     .foregroundStyle(messageIsError ? SBTheme.bad : SBTheme.good)
             }
         }
-        Section("Units") {
-            Picker("Temperature", selection: $settings.weatherUnits) {
-                ForEach(WeatherUnits.allCases) { unit in
-                    Text(unit.displayName).tag(unit)
+        if showsUnits {
+            Section("Units") {
+                Picker("Temperature", selection: $settings.weatherUnits) {
+                    ForEach(WeatherUnits.allCases) { unit in
+                        Text(unit.displayName).tag(unit)
+                    }
                 }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
         }
     }
 

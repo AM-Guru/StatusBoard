@@ -124,6 +124,11 @@ struct SplitRootView: View {
                             Label("World Clocks", systemImage: "globe")
                         }
                         Button {
+                            model.store.add(.clockFaces())
+                        } label: {
+                            Label("Clock Faces", systemImage: "clock.badge")
+                        }
+                        Button {
                             model.store.add(.glassGallery())
                         } label: {
                             Label("Glass", systemImage: "square.on.square.dashed")
@@ -287,17 +292,44 @@ struct ScreenTargetMenu: View {
                       systemImage: model.layoutTarget == nil ? "checkmark" : current.symbolName)
             }
             Section("Arrange For") {
-                ForEach(SBDeviceClass.allCases) { device in
-                    Button {
-                        // Picking a screen is asking to arrange it, so drop
-                        // straight into edit mode.
-                        model.layoutTarget = device
-                        model.isEditing = true
-                    } label: {
-                        Label(device.displayName,
-                              systemImage: model.layoutTarget == device
-                                  ? "checkmark" : device.symbolName)
+                // Grouped by hardware, with a submenu for the screens that
+                // turn: an iPhone lying on its side is a different shape and
+                // carries a different arrangement, but it is still an iPhone.
+                ForEach(offeredFamilies) { family in
+                    if family.layouts.count > 1 {
+                        Menu {
+                            ForEach(family.layouts) { device in
+                                Button {
+                                    arrange(device)
+                                } label: {
+                                    Label(device.orientation.displayName,
+                                          systemImage: model.layoutTarget == device
+                                              ? "checkmark" : device.symbolName)
+                                }
+                            }
+                        } label: {
+                            Label(family.displayName,
+                                  systemImage: family.primaryLayout.symbolName)
+                        }
+                    } else {
+                        Button {
+                            arrange(family.primaryLayout)
+                        } label: {
+                            Label(label(for: family),
+                                  systemImage: model.layoutTarget == family.primaryLayout
+                                      ? "checkmark" : family.primaryLayout.symbolName)
+                        }
                     }
+                }
+            }
+            // Nothing else in this menu can be absent, so a wearer who expected
+            // the glasses and doesn't see them needs to be told where the switch
+            // is rather than left wondering.
+            if !model.glassesLink.isOffered {
+                Section {
+                    Toggle("Arrange for Smart Glasses", isOn: Binding(
+                        get: { model.glassesLink.alwaysOffered },
+                        set: { model.glassesLink.alwaysOffered = $0 }))
                 }
             }
         } label: {
@@ -305,7 +337,28 @@ struct ScreenTargetMenu: View {
                   systemImage: (model.layoutTarget ?? current).symbolName)
         }
         .labelStyle(.titleAndIcon)
-        .help("Choose the screen this window arranges: Apple TV, iPad, iPhone, Mac or Watch")
+        .help("Choose the screen this window arranges: Apple TV, iPad, iPhone, Mac, Watch — or a linked pair of smart glasses — and which way it is turned")
+    }
+
+    /// Every screen worth offering. The glasses are the one entry that can be
+    /// absent: Status Board doesn't run on them, so the screen only means
+    /// something while a SybilSight is linked to draw it.
+    private var offeredFamilies: [SBDeviceFamily] {
+        SBDeviceFamily.allCases.filter { !$0.requiresLink || model.glassesLink.isOffered }
+    }
+
+    /// The glasses are named after the pair that's linked, when one is, so the
+    /// menu says "Kalani's iPhone" rather than a generic label the wearer has to
+    /// match up to hardware themselves.
+    private func label(for family: SBDeviceFamily) -> String {
+        guard family == .glasses, model.glassesLink.isLive else { return family.displayName }
+        return "\(family.displayName) — \(model.glassesLink.displayName)"
+    }
+
+    /// Picking a screen is asking to arrange it, so drop straight into edit mode.
+    private func arrange(_ device: SBDeviceClass) {
+        model.layoutTarget = device
+        model.isEditing = true
     }
 }
 
@@ -428,14 +481,9 @@ struct TVRootView: View {
                     .transition(.opacity)
             }
         }
-        .overlay(alignment: .bottomTrailing) {
-            if case .connected(let name) = model.bridgeClient.connectionState {
-                Label(name, systemImage: "antenna.radiowaves.left.and.right")
-                    .font(.system(size: 20, design: .rounded))
-                    .foregroundStyle(SBTheme.textSecondary)
-                    .padding(28)
-            }
-        }
+        // The board is the picture; nothing permanent sits on top of it. Which
+        // Mac this Apple TV is connected to belongs in the menu and in the
+        // empty state, not burned into the corner of every board.
         .sheet(isPresented: $showsMenu) {
             TVMenuView(model: model,
                        autoCycleSeconds: $autoCycleSeconds,
@@ -553,6 +601,7 @@ struct TVMenuView: View {
             VStack(alignment: .leading, spacing: 52) {
                 header
                 boardsSection
+                schoolSection
                 displaySection
                 cycleSection
                 footer
@@ -601,6 +650,35 @@ struct TVMenuView: View {
                 }
             }
         }
+    }
+
+    /// Where the K12 sign-in came from — shown only when a board here actually
+    /// has a class panel on it.
+    ///
+    /// An Apple TV cannot sign in to the portal: that takes a web view, and
+    /// tvOS has none. So it borrows one, either through your private iCloud
+    /// database or from a Mac on this network. When neither has arrived, this
+    /// is the only place that can say so — the panel itself has room for one
+    /// line of error and no way to explain it.
+    @ViewBuilder
+    private var schoolSection: some View {
+        if model.store.allPanels.contains(where: { $0.kind == .k12schedule || $0.kind == .schedule }) {
+            VStack(alignment: .leading, spacing: 16) {
+                sectionHeader("Class Schedule", detail: schoolDetail,
+                              isWarning: !K12Session.shared.isSignedIn
+                                  && !model.bridgeClient.isConnected)
+            }
+        }
+    }
+
+    private var schoolDetail: String {
+        if K12Session.shared.isSignedIn {
+            return "Signed in to \(K12Session.shared.portal) — the sign-in came from another device through iCloud."
+        }
+        if case .connected(let name) = model.bridgeClient.connectionState {
+            return "No sign-in of its own; asking \(name) for the schedule instead."
+        }
+        return "Sign in to K12 on your iPhone or Mac. This Apple TV can't show the portal's sign-in page, so it uses the session from there — over iCloud, or from a Mac on this network."
     }
 
     private var displaySection: some View {

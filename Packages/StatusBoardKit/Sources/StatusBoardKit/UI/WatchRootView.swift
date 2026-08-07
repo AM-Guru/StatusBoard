@@ -1,14 +1,18 @@
 #if os(watchOS)
 import SwiftUI
+import WatchKit
 
 /// Apple Watch experience. The same boards that appear on the Mac, iPhone,
 /// iPad and Apple TV arrive here over iCloud sync — reflowed by
 /// ``WatchLayout`` rather than shrunk, so a board stays readable from a 40 mm
-/// screen up to a 49 mm one. Two ways to read it: the board itself, or a
-/// compact index of every panel.
+/// screen up to a 49 mm one.
+///
+/// The watch gives up its chrome for the panels: no navigation title, no
+/// system clock, no toolbar button. One screenful of board at a time, turned
+/// with the crown, and a press and hold anywhere for settings.
 public struct WatchRootView: View {
     @Bindable var model: AppModel
-    @State private var showsIndex = false
+    @State private var showsSettings = false
 
     public init(model: AppModel) {
         self.model = model
@@ -16,24 +20,31 @@ public struct WatchRootView: View {
 
     public var body: some View {
         NavigationStack {
-            Group {
-                if showsIndex {
-                    WatchPanelIndex(model: model)
-                } else {
-                    WatchBoardScroll(model: model)
-                }
-            }
-            .navigationTitle(showsIndex ? "All Panels" : "Status Board")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        withAnimation { showsIndex.toggle() }
-                    } label: {
-                        Image(systemName: showsIndex ? "square.grid.2x2" : "list.bullet")
+            WatchBoardPager(model: model)
+                .containerBackground(.black, for: .navigation)
+                .toolbar(.hidden, for: .navigationBar)
+                // The watch draws its clock above the navigation bar, so
+                // hiding the bar alone still leaves the time over the board.
+                // `_statusBarHidden` is watchOS's only door to it — SwiftUI
+                // ships no un-prefixed spelling on this platform (the
+                // `.toolbar(_:for: .statusBar)` replacement is iOS-only), and
+                // it is declared in SwiftUI's public interface for watchOS 6
+                // and later.
+                ._statusBarHidden()
+                .ignoresSafeArea()
+                // Simultaneous so the crown and the page swipes keep working.
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.5).onEnded { _ in
+                        WKInterfaceDevice.current().play(.click)
+                        showsSettings = true
                     }
-                    .accessibilityLabel(showsIndex ? "Show boards" : "Show all panels")
+                )
+                // VoiceOver cannot press and hold, so it gets the same door
+                // as a rotor action.
+                .accessibilityAction(named: Text("Settings")) { showsSettings = true }
+                .sheet(isPresented: $showsSettings) {
+                    WatchSettingsView(model: model)
                 }
-            }
         }
         .tint(SBTheme.accent)
     }
@@ -41,72 +52,92 @@ public struct WatchRootView: View {
 
 // MARK: - Board
 
-/// Every dashboard, stacked. Vertical scrolling only, so it never fights the
-/// system's edge-swipe back gesture.
-struct WatchBoardScroll: View {
+/// One screenful of board per page, in the order the board reads, minus
+/// anything hidden on the watch. Every dashboard follows the one before it, so
+/// the crown walks the whole collection without ever leaving the panels.
+struct WatchBoardPager: View {
     let model: AppModel
+    @State private var selection: Panel.ID?
 
     var body: some View {
         GeometryReader { proxy in
-            let screenWidth = proxy.size.width
-            let widthClass = WatchLayout.width(forScreenWidth: screenWidth)
+            let size = proxy.size
+            let pages = pages(forScreenWidth: size.width)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    if model.store.dashboards.isEmpty {
-                        WatchEmptyState()
-                    }
-                    ForEach(model.store.dashboards) { board in
-                        if model.store.dashboards.count > 1 {
-                            Text(board.name.uppercased())
-                                .font(.system(size: 11, weight: .heavy, design: .rounded))
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 2)
-                        }
-                        ForEach(Array(rows(for: board, widthClass: widthClass).enumerated()),
-                                id: \.offset) { _, row in
-                            HStack(spacing: 6) {
-                                ForEach(row) { panel in
-                                    WatchTile(model: model,
-                                              panel: panel,
-                                              height: WatchLayout.tileHeight(
-                                                forScreenWidth: screenWidth,
-                                                isFullWidth: row.count == 1))
-                                }
-                            }
+            Group {
+                if pages.isEmpty {
+                    WatchEmptyState()
+                        .frame(width: size.width, height: size.height)
+                } else {
+                    TabView(selection: $selection) {
+                        ForEach(pages) { page in
+                            WatchPageView(model: model, page: page)
+                                .frame(width: size.width, height: size.height)
+                                .tag(Optional(page.id))
                         }
                     }
+                    .tabViewStyle(.verticalPage)
                 }
-                .padding(.horizontal, 2)
-                .padding(.bottom, 8)
             }
+            // A board arriving over iCloud can retire the page we were on;
+            // land on the first one rather than an empty screen.
+            .onChange(of: pages.map(\.id)) { _, ids in
+                if selection == nil || !ids.contains(selection!) { selection = ids.first }
+            }
+            .onAppear { if selection == nil { selection = pages.first?.id } }
+            .onChange(of: selection) { _, id in refresh(pageID: id, in: pages) }
+        }
+        .ignoresSafeArea()
+    }
+
+    /// The watch's own arrangement of every board: a single column by default,
+    /// pairing small panels up on the sizes wide enough to keep them legible.
+    private func pages(forScreenWidth width: CGFloat) -> [WatchPage] {
+        let widthClass = WatchLayout.width(forScreenWidth: width)
+        return model.store.dashboards.flatMap { board in
+            WatchLayout.rows(for: board.panelsInReadingOrder(for: .watch),
+                             boardColumns: board.grid(for: .watch).columns,
+                             width: widthClass)
+                .compactMap { WatchPage(panels: $0) }
         }
     }
 
-    private func rows(for board: Dashboard, widthClass: WatchLayout.Width) -> [[Panel]] {
-        WatchLayout.rows(for: board.panels,
-                         boardColumns: board.grid.columns,
-                         width: widthClass)
+    /// Turning to a page asks its panels for fresh data, the way opening a
+    /// panel used to.
+    private func refresh(pageID: Panel.ID?, in pages: [WatchPage]) {
+        guard let page = pages.first(where: { $0.id == pageID }) else { return }
+        for panel in page.panels where panel.kind.isFetched {
+            model.engine.refreshNow(panel: panel)
+        }
     }
 }
 
-/// One panel, rendered with the same ``PanelView`` every other platform uses
-/// so all panel kinds stay in sync — just constrained to a watch-sized tile.
-struct WatchTile: View {
+/// A row of the reflowed board, identified by its first panel so that pages
+/// keep their place across a sync.
+struct WatchPage: Identifiable {
+    let id: Panel.ID
+    let panels: [Panel]
+
+    init?(panels: [Panel]) {
+        guard let first = panels.first else { return nil }
+        self.id = first.id
+        self.panels = panels
+    }
+}
+
+/// One page, rendered with the same ``PanelView`` every other platform uses so
+/// all panel kinds stay in sync — edge to edge, filling the display.
+struct WatchPageView: View {
     let model: AppModel
-    let panel: Panel
-    let height: CGFloat
+    let page: WatchPage
 
     var body: some View {
-        NavigationLink {
-            WatchPanelDetailView(model: model, panel: panel)
-        } label: {
-            PanelView(panel: panel, record: model.snapshots.record(for: panel.snapshotKey))
-                .frame(maxWidth: .infinity)
-                .frame(height: height)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        HStack(spacing: 3) {
+            ForEach(page.panels) { panel in
+                PanelView(panel: panel, record: model.snapshots.record(for: panel.snapshotKey))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
-        .buttonStyle(.plain)
     }
 }
 
@@ -123,27 +154,56 @@ struct WatchEmptyState: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 20)
+        .padding(.horizontal, 8)
+    }
+}
+
+// MARK: - Settings
+
+/// Everything the board no longer shows: the index of every panel, and the
+/// refresh the toolbar used to hold. Reached by pressing and holding the
+/// board.
+struct WatchSettingsView: View {
+    let model: AppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        for board in model.store.dashboards {
+                            for panel in board.panels where panel.kind.isFetched {
+                                model.engine.refreshNow(panel: panel)
+                            }
+                        }
+                        dismiss()
+                    } label: {
+                        Label("Refresh All", systemImage: "arrow.clockwise")
+                    }
+                }
+                WatchPanelIndexSections(model: model)
+            }
+            .navigationTitle("Settings")
+        }
+        .tint(SBTheme.accent)
     }
 }
 
 // MARK: - Index
 
-struct WatchPanelIndex: View {
+struct WatchPanelIndexSections: View {
     let model: AppModel
 
     var body: some View {
-        List {
-            ForEach(model.store.dashboards) { board in
-                Section(board.name) {
-                    ForEach(board.panels) { panel in
-                        NavigationLink {
-                            WatchPanelDetailView(model: model, panel: panel)
-                        } label: {
-                            WatchPanelRow(panel: panel,
-                                          record: model.snapshots.record(for: panel.snapshotKey))
-                        }
+        ForEach(model.store.dashboards) { board in
+            Section(board.name) {
+                ForEach(board.panels) { panel in
+                    NavigationLink {
+                        WatchPanelDetailView(model: model, panel: panel)
+                    } label: {
+                        WatchPanelRow(panel: panel,
+                                      record: model.snapshots.record(for: panel.snapshotKey))
                     }
                 }
             }

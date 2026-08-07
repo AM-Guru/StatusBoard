@@ -1339,6 +1339,45 @@ struct K12ScheduleSnapshotTests {
         }
     }
 
+    /// Apple TV can't sign in to the K12 portal — no WebKit — so it asks the
+    /// Mac, and the Mac sends back the finished schedule rather than its
+    /// session. Nothing credential-shaped belongs on this wire.
+    @Test func k12RequestAndAnswerRoundtrip() throws {
+        let request = BridgeMessage.k12Request(id: "abc", portal: "https://home.k12.com",
+                                               mode: "todayClasses")
+        let requestLine = try #require(request.encodedLine())
+        if case .k12Request(let id, let portal, let mode) =
+            try #require(BridgeMessage.decodeLine(requestLine.dropLast())) {
+            #expect(id == "abc")
+            #expect(portal == "https://home.k12.com")
+            #expect(mode == "todayClasses")
+        } else {
+            Issue.record("wrong message type")
+        }
+
+        let classes: [ScheduledClass] = [
+            ScheduledClass(id: "1", course: "Algebra", start: Date(), end: nil,
+                           timeText: "9:00 AM", teacher: "Ms Ada", attendanceRequired: true,
+                           url: nil)
+        ]
+        let answer = BridgeMessage.k12Response(id: "abc",
+                                               record: SnapshotRecord(snapshot: .schedule(classes)),
+                                               error: nil)
+        let answerLine = try #require(answer.encodedLine())
+        if case .k12Response(let id, let record, let error) =
+            try #require(BridgeMessage.decodeLine(answerLine.dropLast())) {
+            #expect(id == "abc")
+            #expect(error == nil)
+            if case .schedule(let decoded)? = record?.snapshot {
+                #expect(decoded.map(\.course) == ["Algebra"])
+            } else {
+                Issue.record("expected a schedule")
+            }
+        } else {
+            Issue.record("wrong message type")
+        }
+    }
+
     @Test func pushRequestDecoding() throws {
         let json = #"{"key":"cpu","number":42.5,"unit":"%","history":60}"#
         let push = try JSONDecoder().decode(BridgePushRequest.self, from: Data(json.utf8))
@@ -1423,13 +1462,97 @@ struct WatchLayoutTests {
         return board
     }
 
-    @Test func devicesWithoutOverridesShareOneLayout() {
+    /// The big screens are all roughly the shape the board was drawn for, so
+    /// they follow it exactly until someone says otherwise.
+    @Test func wideScreensWithoutOverridesShareOneLayout() {
         let board = board()
-        for device in SBDeviceClass.allCases {
+        for device in [SBDeviceClass.mac, .pad, .tv] {
             #expect(board.hasCustomLayout(for: device) == false)
+            #expect(board.usesAutomaticLayout(for: device) == false)
             #expect(board.panels(for: device).map(\.frame) == board.panels.map(\.frame))
             #expect(board.grid(for: device).columns == board.grid.columns)
         }
+    }
+
+    /// A phone and a watch are nothing like an eight-column board, so they
+    /// reflow instead of following it — without anyone having to arrange them.
+    @Test func narrowScreensArrangeThemselvesInASingleColumn() {
+        let board = board()
+        for device in [SBDeviceClass.phone, .watch] {
+            #expect(board.usesAutomaticLayout(for: device))
+            #expect(board.hasCustomLayout(for: device) == false)   // nothing is stored
+            let grid = board.grid(for: device)
+            let shown = board.panels(for: device)
+            #expect(grid.columns == 1)
+            #expect(shown.count == board.panels.count)             // nothing is dropped
+            for panel in shown {
+                #expect(panel.frame.x == 0)
+                #expect(panel.frame.width == 1)
+                #expect(panel.frame.y + panel.frame.height <= grid.rows)
+            }
+            // Stacked, never overlapping.
+            let sorted = shown.map(\.frame).sorted { $0.y < $1.y }
+            for (above, below) in zip(sorted, sorted.dropFirst()) {
+                #expect(above.y + above.height <= below.y)
+            }
+        }
+    }
+
+    @Test func panelsStackInTheOrderTheBoardReads() {
+        var board = board()
+        board.panels[0].frame = GridRect(x: 2, y: 0, width: 2, height: 1)   // Clock on the right
+        board.panels[1].frame = GridRect(x: 0, y: 0, width: 2, height: 1)   // Note on the left
+        let stacked = board.panelsInReadingOrder(for: .phone)
+        #expect(stacked.map(\.title) == ["Note", "Clock"])
+    }
+
+    @Test func turningTheScreenPicksUpADifferentArrangement() {
+        let board = board()
+        #expect(board.grid(for: .phone).columns == 1)
+        #expect(board.grid(for: .phoneLandscape).columns == 2)
+        #expect(board.grid(for: .padPortrait).columns == 4)
+        #expect(board.grid(for: .pad).columns == board.grid.columns)   // landscape follows the board
+    }
+
+    @Test func arrangingOneOrientationLeavesTheOtherAlone() {
+        var board = board()
+        let clock = board.panels[0]
+        board.setFrame(GridRect(x: 0, y: 3, width: 1, height: 1), for: clock.id, on: .phone)
+
+        #expect(board.frame(for: clock, device: .phone) == GridRect(x: 0, y: 3, width: 1, height: 1))
+        #expect(board.hasCustomLayout(for: .phoneLandscape) == false)
+        #expect(board.frame(for: clock, device: .phoneLandscape).y == 0)
+        #expect(board.panels[0].frame == clock.frame)   // the shared layout is untouched
+    }
+
+    /// A panel taken off the iPhone should not reappear the moment the phone is
+    /// turned on its side.
+    @Test func hidingOnAScreenCarriesIntoItsOtherOrientation() {
+        var board = board()
+        let note = board.panels[1]
+        board.setHidden(true, for: note.id, on: .phone)
+
+        #expect(board.isHidden(note.id, on: .phoneLandscape))
+        #expect(board.panels(for: .phoneLandscape).count == 1)
+        #expect(board.isHidden(note.id, on: .pad) == false)
+    }
+
+    /// Charts, lists and tables are unreadable in a narrow column, so the
+    /// arranger gives them room instead of a quarter of the screen.
+    @Test func contentThatNeedsRoomGetsIt() {
+        let source = GridRect(x: 0, y: 0, width: 1, height: 1)
+        let chart = SBAutoLayout.span(for: .graph, source: source, sourceColumns: 8, device: .mac)
+        #expect(chart.width >= 2)
+
+        let onAPhone = SBAutoLayout.span(for: .graph, source: source,
+                                         sourceColumns: 8, device: .phone)
+        #expect(onAPhone.width == 1)      // there is only one column to give
+        #expect(onAPhone.height == 2)     // so it takes the room in rows instead
+
+        // A panel that filled half a board still fills half of a smaller one.
+        let half = SBAutoLayout.span(for: .clock, source: GridRect(x: 0, y: 0, width: 4, height: 1),
+                                     sourceColumns: 8, device: .pad)
+        #expect(half.width == 3)
     }
 
     @Test func movingAPanelOnOneDeviceLeavesTheOthersAlone() {
@@ -1496,6 +1619,24 @@ struct WatchLayoutTests {
             #expect(panel.frame.x + panel.frame.width <= grid.columns)
             #expect(panel.frame.y + panel.frame.height <= grid.rows)
         }
+    }
+
+    /// A panel added after a screen was arranged used to arrive carrying its
+    /// board frame, which on a one-column phone stretched the grid back out to
+    /// the width of the board and shrank everything already on it.
+    @Test func aPanelAddedLaterLandsAtTheEndOfANarrowScreen() {
+        var board = board()
+        board.beginCustomLayout(for: .phone)
+        board.panels.append(Panel(kind: .graph, title: "New",
+                                  frame: GridRect(x: 4, y: 0, width: 4, height: 2)))
+
+        let grid = board.grid(for: .phone)
+        #expect(grid.columns == 1)                       // still a single column
+        let placed = board.panels(for: .phone).first { $0.title == "New" }
+        #expect(placed?.frame.x == 0)
+        #expect(placed?.frame.width == 1)
+        #expect(placed?.frame.y == 2)                    // below the two already there
+        #expect(grid.rows >= 4)
     }
 
     @Test func copyingALayoutMirrorsTheSource() {
@@ -1833,6 +1974,67 @@ struct SessionCookieJarTests {
         let entries = jar.persistable
         let later = Date().addingTimeInterval(120)
         #expect(SessionCookieJar.restored(from: entries, now: later).isEmpty)
+    }
+
+    /// Sessions used to be stored as a bare cookie array. Reading that shape
+    /// back is not optional: an update that only understood the new dictionary
+    /// would sign every existing install out on first launch — the very thing
+    /// automatic re-authentication exists to prevent.
+    @Test func aSessionStoredByTheOldBuildIsStillRead() throws {
+        var jar = SessionCookieJar()
+        jar.absorb([cookie("SESSION")])
+        let legacy = try JSONSerialization.data(withJSONObject: jar.persistable)
+        let stored = try #require(K12Session.decodeStored(legacy))
+        #expect(stored.jar.names == ["SESSION"])
+        #expect(stored.portal == K12Session.defaultPortal)
+        // No date in the old shape, so anything another device has is newer.
+        #expect(stored.updatedAt == .distantPast)
+    }
+
+    @Test func aStoredSessionCarriesItsPortalAndMintDate() throws {
+        var jar = SessionCookieJar()
+        jar.absorb([cookie("SESSION", domain: "learn2.k12.com")])
+        let minted = Date(timeIntervalSince1970: 1_700_000_000)
+        let blob = try JSONSerialization.data(withJSONObject: [
+            "cookies": jar.persistable,
+            "portal": "https://learn2.k12.com",
+            "updatedAt": minted.timeIntervalSince1970,
+        ] as [String: Any])
+        let stored = try #require(K12Session.decodeStored(blob))
+        #expect(stored.jar.names == ["SESSION"])
+        #expect(stored.portal == "https://learn2.k12.com")
+        #expect(abs(stored.updatedAt.timeIntervalSince(minted)) < 1)
+    }
+
+    /// A session travelling to an Apple TV is cookies and nothing else — no
+    /// username, no password, no way to reconstruct either.
+    @Test func aSessionInTransitCarriesNoPassword() throws {
+        var jar = SessionCookieJar()
+        jar.absorb([cookie("SESSION")])
+        let payload = K12Session.SessionPayload(portal: K12Session.defaultPortal,
+                                                cookies: jar.persistable,
+                                                updatedAt: Date())
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let json = try #require(String(data: try encoder.encode(payload), encoding: .utf8))
+        #expect(!json.lowercased().contains("password"))
+        #expect(!json.lowercased().contains("username"))
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(K12Session.SessionPayload.self, from: Data(json.utf8))
+        #expect(SessionCookieJar.restored(from: decoded.cookies).names == ["SESSION"])
+    }
+
+    /// OLS and Canvas answer on different paths, and one portal field serves
+    /// both. Probing the wrong one first reported an HTML 404 as an expired
+    /// sign-in and sent people back to re-authenticate for no reason.
+    @Test func theFirstProbeSuitsTheHost() {
+        #expect(K12Session.probePaths(for: "https://home.k12.com").first
+                == "/api/canvas/events/classes")
+        #expect(K12Session.probePaths(for: "learn2.k12.com").first == "/api/v1/users/self")
+        #expect(K12Session.probePaths(for: "https://school.instructure.com").first
+                == "/api/v1/users/self")
     }
 
     /// The sign-in sheet adopts by registrable domain, so the SSO hop through
@@ -3267,5 +3469,240 @@ struct SessionCookieJarTests {
             fromPasted: "https://www.google.com/?code=4/abc-DEF&scope=https://x") == "4/abc-DEF")
         #expect(NestCredentials.authorizationCode(fromPasted: "  4/abc-DEF ") == "4/abc-DEF")
         #expect(NestCredentials.authorizationCode(fromPasted: "") == nil)
+    }
+}
+
+@Suite struct SolarCalculatorTests {
+    /// A date built in the zone it is meant to be read in, so a test never
+    /// depends on where the machine running it happens to be.
+    static func date(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12,
+                     zone: String) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: zone)!
+        return calendar.date(from: DateComponents(year: year, month: month, day: day,
+                                                  hour: hour))!
+    }
+
+    static func minutesIntoDay(_ date: Date, zone: String) -> Int {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: zone)!
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        return (parts.hour ?? 0) * 60 + (parts.minute ?? 0)
+    }
+
+    @Test func summerSolsticeInSanFrancisco() {
+        let zone = "America/Los_Angeles"
+        let solar = SolarCalculator.day(
+            containing: Self.date(2026, 6, 21, zone: zone),
+            latitude: 37.7749, longitude: -122.4194, timeZone: TimeZone(identifier: zone)!)
+        let sunrise = Self.minutesIntoDay(solar.sunrise!, zone: zone)
+        let sunset = Self.minutesIntoDay(solar.sunset!, zone: zone)
+        // Published times are 05:48 and 20:35 PDT; the low-precision equation
+        // is good to a couple of minutes, so allow a ten-minute window.
+        #expect(abs(sunrise - (5 * 60 + 48)) <= 10)
+        #expect(abs(sunset - (20 * 60 + 35)) <= 10)
+        #expect(solar.sunrise! < solar.solarNoon)
+        #expect(solar.solarNoon < solar.sunset!)
+        #expect(!solar.isPolarDay && !solar.isPolarNight)
+    }
+
+    @Test func equinoxIsTwelveHoursEverywhere() {
+        for (latitude, longitude, zone) in [(37.77, -122.42, "America/Los_Angeles"),
+                                            (51.51, -0.13, "Europe/London"),
+                                            (-33.87, 151.21, "Australia/Sydney")] {
+            let solar = SolarCalculator.day(
+                containing: Self.date(2026, 3, 20, zone: zone),
+                latitude: latitude, longitude: longitude, timeZone: TimeZone(identifier: zone)!)
+            let hours = (solar.daylight ?? 0) / 3600
+            // Refraction and the sun's radius make the equinox a little longer
+            // than twelve hours, which is why this isn't an exact check.
+            #expect(abs(hours - 12) < 0.3)
+        }
+    }
+
+    @Test func winterIsShorterThanSummerNorthOfTheEquator() {
+        let zone = TimeZone(identifier: "America/New_York")!
+        let june = SolarCalculator.day(
+            containing: Self.date(2026, 6, 21, zone: "America/New_York"),
+            latitude: 40.71, longitude: -74.01, timeZone: zone)
+        let december = SolarCalculator.day(
+            containing: Self.date(2026, 12, 21, zone: "America/New_York"),
+            latitude: 40.71, longitude: -74.01, timeZone: zone)
+        #expect((june.daylight ?? 0) > (december.daylight ?? 0) + 4 * 3600)
+    }
+
+    @Test func theSunNeitherRisesNorSetsInsideThePolarCircles() {
+        let zone = TimeZone(identifier: "Europe/Oslo")!
+        let december = SolarCalculator.day(
+            containing: Self.date(2026, 12, 21, zone: "Europe/Oslo"),
+            latitude: 69.65, longitude: 18.96, timeZone: zone)
+        #expect(december.isPolarNight)
+        #expect(december.sunrise == nil && december.sunset == nil)
+        #expect(december.daylight == nil)
+        #expect(!december.isDaylight(at: december.solarNoon))
+
+        let june = SolarCalculator.day(
+            containing: Self.date(2026, 6, 21, zone: "Europe/Oslo"),
+            latitude: 69.65, longitude: 18.96, timeZone: zone)
+        #expect(june.isPolarDay)
+        #expect(june.isDaylight(at: june.solarNoon))
+    }
+
+    @Test func daylightProgressIsClampedToTheDay() {
+        let zone = TimeZone(identifier: "America/Los_Angeles")!
+        let solar = SolarCalculator.day(
+            containing: Self.date(2026, 6, 21, zone: "America/Los_Angeles"),
+            latitude: 37.7749, longitude: -122.4194, timeZone: zone)
+        #expect(solar.daylightProgress(at: solar.sunrise!.addingTimeInterval(-3600)) == 0)
+        #expect(solar.daylightProgress(at: solar.sunset!.addingTimeInterval(3600)) == 1)
+        let middle = solar.daylightProgress(at: solar.solarNoon)
+        #expect(middle > 0.45 && middle < 0.55)
+    }
+
+    @Test func theNextSunEventIsAlwaysInTheFuture() {
+        let zone = TimeZone(identifier: "America/Los_Angeles")!
+        // Late evening, after the sun has set: today's sunrise is long past,
+        // so the answer has to come from tomorrow.
+        let evening = Self.date(2026, 6, 21, hour: 22, zone: "America/Los_Angeles")
+        let sunrise = SolarCalculator.nextSunrise(after: evening, latitude: 37.7749,
+                                                  longitude: -122.4194, timeZone: zone)
+        #expect(sunrise != nil)
+        #expect(sunrise! > evening)
+        #expect(sunrise!.timeIntervalSince(evening) < 12 * 3600)
+
+        let sunset = SolarCalculator.nextSunset(after: evening, latitude: 37.7749,
+                                                longitude: -122.4194, timeZone: zone)
+        #expect(sunset != nil && sunset! > evening)
+    }
+
+    @Test func aPlaceEastOfGreenwichSeesTheSunFirst() {
+        let tokyo = SolarCalculator.day(
+            containing: Self.date(2026, 4, 10, zone: "Asia/Tokyo"),
+            latitude: 35.68, longitude: 139.69, timeZone: TimeZone(identifier: "Asia/Tokyo")!)
+        let london = SolarCalculator.day(
+            containing: Self.date(2026, 4, 10, zone: "Europe/London"),
+            latitude: 51.51, longitude: -0.13, timeZone: TimeZone(identifier: "Europe/London")!)
+        // Same calendar day, but Tokyo's sunrise happens hours earlier in
+        // absolute time — a sign check that would fail if longitude were
+        // applied the wrong way round.
+        #expect(tokyo.sunrise! < london.sunrise!)
+    }
+}
+
+@Suite struct ClockFaceTests {
+    @Test func aClockSavedBeforeFacesKeepsTheLCD() throws {
+        // Only the fields the old build wrote. The decoder must fill the rest.
+        let json = """
+        {"refreshSeconds":300,"showsSeconds":true,"timeZoneID":"Europe/Paris"}
+        """
+        let settings = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        #expect(settings.clockStyle == .lcd)
+        // The old build always drew "HH:mm", so an old panel stays 24-hour
+        // even though a new one starts on the region's own format.
+        #expect(settings.clockHourFormat == .twentyFour)
+        #expect(PanelSettings().clockHourFormat == .automatic)
+        #expect(settings.showsClockDate)
+        #expect(settings.showsSunPosition)
+        #expect(settings.timeZoneID == "Europe/Paris")
+    }
+
+    @Test func aFaceThisBuildDoesNotKnowFallsBackInsteadOfFailing() throws {
+        let json = """
+        {"clockStyle":"holographic","showsSeconds":false,"clockHourFormat":"sundial"}
+        """
+        let settings = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        #expect(settings.clockStyle == .lcd)
+        #expect(settings.clockHourFormat == .twentyFour)
+        // The rest of the panel's choices survive the unknown values.
+        #expect(settings.showsSeconds == false)
+    }
+
+    @Test func facesSurviveARoundTrip() throws {
+        for style in ClockStyle.allCases {
+            var settings = PanelSettings()
+            settings.clockStyle = style
+            settings.clockHourFormat = .twelve
+            settings.showsClockDate = false
+            let data = try JSONEncoder().encode(settings)
+            let decoded = try JSONDecoder().decode(PanelSettings.self, from: data)
+            #expect(decoded.clockStyle == style)
+            #expect(decoded.clockHourFormat == .twelve)
+            #expect(decoded.showsClockDate == false)
+        }
+    }
+
+    @Test func onlyTheSunFacesInsistOnALocation() {
+        #expect(ClockStyle.sunArc.needsLocation)
+        #expect(ClockStyle.sunTimes.needsLocation)
+        #expect(!ClockStyle.dial.needsLocation)
+        // The dial draws daylight when it has somewhere to draw it for, so it
+        // still offers the location editor.
+        #expect(ClockStyle.dial.usesLocation)
+        #expect(!ClockStyle.lcd.usesLocation)
+    }
+
+    @Test func hourFormatFollowsTheRegionUnlessTold() {
+        #expect(ClockHourFormat.twelve.isTwentyFourHour(locale: Locale(identifier: "en_GB")) == false)
+        #expect(ClockHourFormat.twentyFour.isTwentyFourHour(locale: Locale(identifier: "en_US")))
+        #expect(ClockHourFormat.automatic.isTwentyFourHour(locale: Locale(identifier: "en_US")) == false)
+        #expect(ClockHourFormat.automatic.isTwentyFourHour(locale: Locale(identifier: "en_GB")))
+        #expect(ClockHourFormat.automatic.isTwentyFourHour(locale: Locale(identifier: "de_DE")))
+    }
+
+    @Test func durationsReadTheWayAPersonWouldSayThem() {
+        #expect(clockDurationText(0) == "0m")
+        #expect(clockDurationText(-500) == "0m")
+        #expect(clockDurationText(2 * 3600 + 10 * 60) == "2h 10m")
+        #expect(clockDurationText(45 * 60) == "45m")
+    }
+
+    @Test func aSunFaceSpeaksItsSunTimes() {
+        var panel = Panel(kind: .clock, title: "Sun",
+                          frame: GridRect(x: 0, y: 0, width: 4, height: 2))
+        panel.settings.clockStyle = .sunTimes
+        panel.settings.latitude = 37.7749
+        panel.settings.longitude = -122.4194
+        panel.settings.timeZoneID = "America/Los_Angeles"
+        let noon = SolarCalculatorTests.date(2026, 6, 21, zone: "America/Los_Angeles")
+        let spoken = AccessibilitySummary.clockLabel(panel, title: "Sun", now: noon)
+        #expect(spoken.contains("Sunrise"))
+        #expect(spoken.contains("sunset"))
+
+        // A plain LCD clock says the time and stops there.
+        panel.settings.clockStyle = .lcd
+        let plain = AccessibilitySummary.clockLabel(panel, title: "Sun", now: noon)
+        #expect(!plain.contains("Sunrise"))
+    }
+
+    @Test func aPolarSunFaceSaysSoOutLoud() {
+        var panel = Panel(kind: .clock, title: "Tromsø",
+                          frame: GridRect(x: 0, y: 0, width: 4, height: 2))
+        panel.settings.clockStyle = .sunArc
+        panel.settings.latitude = 69.65
+        panel.settings.longitude = 18.96
+        panel.settings.timeZoneID = "Europe/Oslo"
+        let winter = SolarCalculatorTests.date(2026, 12, 21, zone: "Europe/Oslo")
+        let spoken = AccessibilitySummary.clockLabel(panel, title: "Tromsø", now: winter)
+        #expect(spoken.contains("does not rise"))
+    }
+
+    @Test func theSampleBoardShowsEveryFace() {
+        let board = Dashboard.clockFaces()
+        let faces = Set(board.panels.map(\.settings.clockStyle))
+        #expect(faces == Set(ClockStyle.allCases))
+        // Every panel has to fit the board it ships with, and none may overlap.
+        for panel in board.panels {
+            #expect(panel.frame.x + panel.frame.width <= board.grid.columns)
+            #expect(panel.frame.y + panel.frame.height <= board.grid.rows)
+        }
+        for (index, panel) in board.panels.enumerated() {
+            for other in board.panels.dropFirst(index + 1) {
+                #expect(!panel.frame.intersects(other.frame))
+            }
+        }
+        // The sun faces would be blank without somewhere to report on.
+        for panel in board.panels where panel.settings.clockStyle.needsLocation {
+            #expect(panel.settings.latitude != nil && panel.settings.longitude != nil)
+        }
     }
 }

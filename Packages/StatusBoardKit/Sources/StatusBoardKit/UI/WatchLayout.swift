@@ -26,6 +26,9 @@ public enum WatchLayout {
 
     /// Panels whose content is a chart, a list or a table are unreadable at
     /// half width, so they always take the full row.
+    ///
+    /// ``SBAutoLayout`` reads this too: it is the same judgement about which
+    /// panels cannot be narrowed, and the two must not drift apart.
     public static func prefersFullWidth(_ kind: PanelKind) -> Bool {
         switch kind {
         case .graph, .table, .feed, .calendar, .logs, .webClip, .image,

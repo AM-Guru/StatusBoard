@@ -503,11 +503,27 @@ struct WeatherContentView: View {
     }
 
     var body: some View {
-        ViewThatFits(in: .vertical) {
-            fullLayout
-            compactLayout
+        // A wide panel gets the days down the right-hand side, where they can
+        // be bigger than a strip squeezed underneath. Both axes are checked, so
+        // a side-by-side is only taken when the panel really has the width for
+        // it; anything narrower falls through to the stacked layouts, whose own
+        // choice is a vertical one exactly as it was before.
+        ViewThatFits(in: [.horizontal, .vertical]) {
+            splitLayout(.large)
+            splitLayout(.medium)
+            splitLayout(.small)
+            stackedLayouts
         }
         .padding(10)
+    }
+
+    private var stackedLayouts: some View {
+        ViewThatFits(in: .vertical) {
+            layout(.large)
+            layout(.medium)
+            layout(.small)
+            compactLayout
+        }
     }
 
     var compactLayout: some View {
@@ -520,52 +536,135 @@ struct WeatherContentView: View {
                 .foregroundStyle(sbStyle.textPrimary)
             Spacer(minLength: 0)
         }
+        .shadow(color: skyShadow, radius: 3, y: 1)
     }
 
-    var fullLayout: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 12) {
-                Image(systemName: report.symbolName)
-                    .font(.system(size: 34))
-                    .symbolRenderingMode(.multicolor)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(temperature(report.temperatureC), format: temperatureStyle)
-                        .font(SBTheme.lcdFont(size: 34))
-                        .foregroundStyle(sbStyle.textPrimary)
-                    Text(report.conditionDescription)
-                        .font(.system(size: 12, design: .rounded))
-                        .foregroundStyle(sbStyle.textSecondary)
-                    if let detail = detailLine {
-                        Text(detail)
-                            .font(.system(size: 10, design: .rounded))
-                            .foregroundStyle(sbStyle.textSecondary.opacity(0.85))
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
+    /// Conditions above, the five days in a strip underneath.
+    private func layout(_ metrics: WeatherMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+            nowBlock(metrics, symbol: metrics.nowSymbol, temperature: metrics.nowTemperature)
             if !report.days.isEmpty {
-                HStack(spacing: 0) {
-                    ForEach(report.days) { day in
-                        VStack(spacing: 2) {
-                            Text(day.dateLabel.uppercased())
-                                .font(SBTheme.titleFont(size: 9))
-                                .foregroundStyle(sbStyle.textSecondary)
-                            Image(systemName: day.symbolName)
-                                .font(.system(size: 13))
-                                .symbolRenderingMode(.multicolor)
-                            Text(degrees(day.highC))
-                                .font(SBTheme.lcdFont(size: 12))
-                                .foregroundStyle(sbStyle.textPrimary)
-                            Text(degrees(day.lowC))
-                                .font(SBTheme.lcdFont(size: 11))
-                                .foregroundStyle(sbStyle.textSecondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
+                dayStrip(metrics)
             }
         }
+    }
+
+    /// Conditions on the left, the five days listed down the right. Only ever
+    /// chosen when the panel is wide enough to hold both.
+    private func splitLayout(_ metrics: WeatherMetrics) -> some View {
+        HStack(spacing: 16) {
+            nowBlock(metrics, symbol: metrics.wideNowSymbol,
+                     temperature: metrics.wideNowTemperature)
+            // Wide enough for the two blocks to sit apart, not merely wide
+            // enough for them both to exist — below that, stacking reads better.
+            Spacer(minLength: 28)
+            if !report.days.isEmpty {
+                dayList(metrics)
+            }
+        }
+    }
+
+    private func nowBlock(_ metrics: WeatherMetrics, symbol: CGFloat,
+                          temperature size: CGFloat) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: report.symbolName)
+                .font(.system(size: symbol))
+                .symbolRenderingMode(.multicolor)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(temperature(report.temperatureC), format: temperatureStyle)
+                    .font(SBTheme.lcdFont(size: size))
+                    .foregroundStyle(sbStyle.textPrimary)
+                Text(report.conditionDescription)
+                    .font(.system(size: metrics.condition, weight: .medium, design: .rounded))
+                    .foregroundStyle(sbStyle.textPrimary.opacity(0.88))
+                if let detail = detailLine {
+                    Text(detail)
+                        .font(.system(size: metrics.detail, weight: .medium, design: .rounded))
+                        .foregroundStyle(sbStyle.textPrimary.opacity(0.72))
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .shadow(color: skyShadow, radius: 3, y: 1)
+    }
+
+    /// One day per row. The columns are given widths from the type sizes rather
+    /// than from their contents, so the days line up whatever the numbers are.
+    private func dayList(_ metrics: WeatherMetrics) -> some View {
+        VStack(spacing: metrics.rowGap) {
+            ForEach(report.days) { day in
+                HStack(spacing: metrics.rowGap + 4) {
+                    Text(day.dateLabel.uppercased())
+                        .font(SBTheme.titleFont(size: metrics.dayLabel))
+                        .foregroundStyle(sbStyle.textPrimary.opacity(0.8))
+                        .frame(width: metrics.dayLabel * 3.1, alignment: .leading)
+                    Image(systemName: day.symbolName)
+                        .font(.system(size: metrics.daySymbol))
+                        .symbolRenderingMode(.multicolor)
+                        .frame(width: metrics.daySymbol * 1.4)
+                    Text(degrees(day.highC))
+                        .font(SBTheme.lcdFont(size: metrics.dayHigh))
+                        .foregroundStyle(sbStyle.textPrimary)
+                        .frame(width: metrics.dayHigh * 2.4, alignment: .trailing)
+                    Text(degrees(day.lowC))
+                        .font(SBTheme.lcdFont(size: metrics.dayLow))
+                        .foregroundStyle(sbStyle.textPrimary.opacity(0.72))
+                        .frame(width: metrics.dayLow * 2.4, alignment: .trailing)
+                }
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            }
+        }
+        .padding(.vertical, metrics.dayPadding)
+        .padding(.horizontal, metrics.dayPadding + 4)
+        .background(dayPlate)
+    }
+
+    private func dayStrip(_ metrics: WeatherMetrics) -> some View {
+        HStack(spacing: 0) {
+            ForEach(report.days) { day in
+                VStack(spacing: metrics.daySpacing) {
+                    Text(day.dateLabel.uppercased())
+                        .font(SBTheme.titleFont(size: metrics.dayLabel))
+                        .foregroundStyle(sbStyle.textPrimary.opacity(0.8))
+                    Image(systemName: day.symbolName)
+                        .font(.system(size: metrics.daySymbol))
+                        .symbolRenderingMode(.multicolor)
+                    Text(degrees(day.highC))
+                        .font(SBTheme.lcdFont(size: metrics.dayHigh))
+                        .foregroundStyle(sbStyle.textPrimary)
+                    Text(degrees(day.lowC))
+                        .font(SBTheme.lcdFont(size: metrics.dayLow))
+                        .foregroundStyle(sbStyle.textPrimary.opacity(0.72))
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.vertical, metrics.dayPadding)
+        .padding(.horizontal, metrics.dayPadding / 2)
+        .background(dayPlate)
+    }
+
+    /// The forecast sits on a live sky that can be noon-bright or midnight
+    /// black, and only the bottom-left corner of it is scrimmed. The strip
+    /// carries its own backing so the five days read the same wherever the
+    /// clouds happen to be.
+    private var dayPlate: some View {
+        let base = sbStyle.isLight ? Color.white : Color.black
+        return RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(base.opacity(sbStyle.isLight ? 0.42 : 0.38))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(sbStyle.textPrimary.opacity(0.12), lineWidth: 1)
+            }
+    }
+
+    /// Lifts the unplated text off the sky behind it. Invisible on a light
+    /// theme, where the text is dark to begin with.
+    private var skyShadow: Color {
+        sbStyle.isLight ? .clear : .black.opacity(0.55)
     }
 
     /// "Feels 21° · 64% · KSFO" — only the parts the source actually reported.
@@ -583,6 +682,51 @@ struct WeatherContentView: View {
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
+}
+
+/// The type sizes one weather layout is made of.
+///
+/// A weather panel is usually given far more height than the forecast needs, so
+/// the view offers three sizes and lets `ViewThatFits` take the largest the
+/// panel can actually hold. `.small` is the size the panel drew at before this
+/// existed, so nothing that fit then stops fitting now.
+///
+/// The `wide` sizes are for the side-by-side layout, where the conditions have
+/// a column to themselves and can afford to be larger.
+struct WeatherMetrics {
+    var nowSymbol: CGFloat
+    var nowTemperature: CGFloat
+    var wideNowSymbol: CGFloat
+    var wideNowTemperature: CGFloat
+    var condition: CGFloat
+    var detail: CGFloat
+    var rowSpacing: CGFloat
+    var dayLabel: CGFloat
+    var daySymbol: CGFloat
+    var dayHigh: CGFloat
+    var dayLow: CGFloat
+    var daySpacing: CGFloat
+    var dayPadding: CGFloat
+    /// Between the rows of the side-by-side day list.
+    var rowGap: CGFloat
+
+    static let large = WeatherMetrics(
+        nowSymbol: 40, nowTemperature: 40, wideNowSymbol: 52, wideNowTemperature: 52,
+        condition: 15, detail: 13, rowSpacing: 10,
+        dayLabel: 13, daySymbol: 24, dayHigh: 20, dayLow: 17, daySpacing: 4,
+        dayPadding: 9, rowGap: 6)
+
+    static let medium = WeatherMetrics(
+        nowSymbol: 34, nowTemperature: 34, wideNowSymbol: 42, wideNowTemperature: 42,
+        condition: 13, detail: 11, rowSpacing: 8,
+        dayLabel: 11, daySymbol: 18, dayHigh: 16, dayLow: 14, daySpacing: 3,
+        dayPadding: 7, rowGap: 4)
+
+    static let small = WeatherMetrics(
+        nowSymbol: 30, nowTemperature: 30, wideNowSymbol: 32, wideNowTemperature: 32,
+        condition: 12, detail: 10, rowSpacing: 2,
+        dayLabel: 9, daySymbol: 13, dayHigh: 12, dayLow: 11, daySpacing: 2,
+        dayPadding: 2, rowGap: 2)
 }
 
 struct SnapshotImageView: View {

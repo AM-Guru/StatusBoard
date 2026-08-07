@@ -36,6 +36,22 @@ public final class CloudSyncEngine: NSObject {
     private static let recordType: CKRecord.RecordType = "Dashboard"
     private static let payloadKey = "payload"
 
+    /// The one record in the zone that isn't a board: the K12 portal session,
+    /// so an Apple TV — which has no WebKit and therefore no way to sign in to
+    /// the portal at all — can still call the API for itself.
+    ///
+    /// It deliberately reuses the `Dashboard` record type and its `payload`
+    /// field. A record type of its own would read better and would also fail
+    /// silently everywhere that matters: types auto-create in the Development
+    /// environment only, so a TestFlight Apple TV would get "unknown record
+    /// type" until someone deployed the schema by hand. Boards are keyed by
+    /// UUID, so this name can never collide with one.
+    ///
+    /// Cookies only, and never inside a board's payload — a board you export or
+    /// share carries no sign-in. The portal password, if you saved one, stays
+    /// in its own device's Keychain.
+    private static let sessionRecordName = "k12-session"
+
     public init(store: DashboardStore) {
         self.store = store
         self.stateURL = SBStorage.localSupportURL()
@@ -47,6 +63,11 @@ public final class CloudSyncEngine: NSObject {
         }
         store.onLocalDelete = { [weak self] id in
             self?.enqueueDelete(id)
+        }
+        // A session this device just signed in (or refreshed, or signed out of)
+        // is the one thing the other devices can't produce for themselves.
+        K12Session.shared.onChange { [weak self] payload in
+            self?.enqueueSessionChange(payload)
         }
     }
 
@@ -95,6 +116,12 @@ public final class CloudSyncEngine: NSObject {
         guard store.authorsBoards else { return }
         for dashboard in store.dashboards {
             enqueueSave(dashboard.id)
+        }
+        // Offer this device's portal session too, so a display that has never
+        // been able to sign in finds one waiting. Display-only devices are past
+        // the guard above: they consume the session, they never publish it.
+        if K12Session.shared.payload != nil {
+            enqueueSessionChange(K12Session.shared.payload)
         }
     }
 
@@ -263,6 +290,16 @@ public final class CloudSyncEngine: NSObject {
         CKRecord.ID(recordName: id.uuidString, zoneID: zoneID)
     }
 
+    private var sessionRecordID: CKRecord.ID {
+        CKRecord.ID(recordName: Self.sessionRecordName, zoneID: zoneID)
+    }
+
+    private func enqueueSessionChange(_ payload: K12Session.SessionPayload?) {
+        engine?.state.add(pendingRecordZoneChanges: [
+            payload == nil ? .deleteRecord(sessionRecordID) : .saveRecord(sessionRecordID)
+        ])
+    }
+
     // MARK: - State serialization
 
     private func loadStateSerialization() -> CKSyncEngine.State.Serialization? {
@@ -286,6 +323,23 @@ public final class CloudSyncEngine: NSObject {
         guard let payload = try? encoder.encode(dashboard) else { return nil }
         record[Self.payloadKey] = payload as NSData
         return record
+    }
+
+    private func makeSessionRecord() -> CKRecord? {
+        guard let payload = K12Session.shared.payload else { return nil }
+        let record = CKRecord(recordType: Self.recordType, recordID: sessionRecordID)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(payload) else { return nil }
+        record[Self.payloadKey] = data as NSData
+        return record
+    }
+
+    private func decodeSession(from record: CKRecord) -> K12Session.SessionPayload? {
+        guard let data = record[Self.payloadKey] as? Data else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(K12Session.SessionPayload.self, from: data)
     }
 
     private func decodeDashboard(from record: CKRecord) -> Dashboard? {
@@ -317,12 +371,18 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
             lastSyncDate = Date()
             lastErrorMessage = nil
             for modification in changes.modifications {
-                if let dashboard = decodeDashboard(from: modification.record) {
+                if modification.record.recordID.recordName == Self.sessionRecordName {
+                    if let payload = decodeSession(from: modification.record) {
+                        K12Session.shared.adopt(payload)
+                    }
+                } else if let dashboard = decodeDashboard(from: modification.record) {
                     store.applyRemote(dashboard)
                 }
             }
             for deletion in changes.deletions {
-                if let id = UUID(uuidString: deletion.recordID.recordName) {
+                if deletion.recordID.recordName == Self.sessionRecordName {
+                    K12Session.shared.adoptRemoteSignOut()
+                } else if let id = UUID(uuidString: deletion.recordID.recordName) {
                     store.applyRemoteDeletion(id: id)
                 }
             }
@@ -330,7 +390,17 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
         case .sentRecordZoneChanges(let sent):
             // Re-queue anything that conflicted; server record wins locally first.
             for failure in sent.failedRecordSaves {
-                if failure.error.code == .serverRecordChanged,
+                if failure.record.recordID.recordName == Self.sessionRecordName {
+                    // Another device refreshed the session at the same moment.
+                    // Newest wins, and `adopt` is what decides that.
+                    if failure.error.code == .serverRecordChanged,
+                       let serverRecord = failure.error.serverRecord,
+                       let payload = decodeSession(from: serverRecord) {
+                        K12Session.shared.adopt(payload)
+                    } else {
+                        lastErrorMessage = Self.describe(failure.error)
+                    }
+                } else if failure.error.code == .serverRecordChanged,
                    let serverRecord = failure.error.serverRecord,
                    let remote = decodeDashboard(from: serverRecord) {
                     store.applyRemote(remote)
@@ -361,7 +431,13 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
         var recordsByID: [CKRecord.ID: CKRecord] = [:]
         for change in pending {
             guard case .saveRecord(let recordID) = change else { continue }
-            if let id = UUID(uuidString: recordID.recordName),
+            if recordID.recordName == Self.sessionRecordName {
+                if let record = makeSessionRecord() {
+                    recordsByID[recordID] = record
+                } else {
+                    syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
+                }
+            } else if let id = UUID(uuidString: recordID.recordName),
                let dashboard = store.dashboard(id: id),
                let record = makeRecord(for: dashboard) {
                 recordsByID[recordID] = record

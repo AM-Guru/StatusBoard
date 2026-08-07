@@ -15,6 +15,10 @@ public struct K12SignInView: View {
     @State private var controller = K12SignInController()
     @State private var isChecking = false
     @State private var errorMessage: String?
+    @State private var showsCredentials = false
+    @State private var username = ""
+    @State private var password = ""
+    @State private var savedUsername: String?
     @Environment(\.dismiss) private var dismiss
 
     public init(portal: String = K12Session.defaultPortal, onFinish: @escaping () -> Void) {
@@ -40,6 +44,8 @@ public struct K12SignInView: View {
                     .background(.orange.opacity(0.12))
                 }
                 Divider()
+                credentialSection
+                Divider()
                 PlatformWebViewWrapper(webView: controller.webView)
             }
             .navigationTitle("Sign in to K12")
@@ -58,7 +64,10 @@ public struct K12SignInView: View {
                 }
             }
         }
-        .onAppear { controller.start(portal: portal) }
+        .onAppear {
+            controller.start(portal: portal)
+            loadSavedCredential()
+        }
         #if os(macOS)
         .frame(minWidth: 720, minHeight: 640)
         #endif
@@ -89,24 +98,17 @@ public struct K12SignInView: View {
         await K12Session.shared.adoptCookies(
             from: controller.webView.configuration.websiteDataStore, portal: portal)
 
-        // The first probe is the one that suits this host; the rest are
-        // fallbacks. Only the first probe's failure is worth reporting —
-        // reporting the *last* one used to surface an HTML 404 from a path
-        // that never applied to this portal, dressed up as an expired session.
-        var firstError: Error?
-        for path in probePaths {
-            do {
-                _ = try await K12Session.shared.json(path: path, portal: portal)
-                onFinish()
-                dismiss()
-                return
-            } catch {
-                if firstError == nil { firstError = error }
-            }
+        // Verifies without the silent-retry wrapper `json` puts around a
+        // request: the user is right here, so a second, invisible sign-in
+        // attempt would only muddy what the sheet reports back to them.
+        guard let failure = await K12Session.shared.verify(portal: portal) else {
+            saveCredentialIfRequested()
+            onFinish()
+            dismiss()
+            return
         }
 
-        let reason = (firstError as? LocalizedError)?.errorDescription
-            ?? firstError?.localizedDescription ?? "no response"
+        let reason = (failure as? LocalizedError)?.errorDescription ?? failure.localizedDescription
         errorMessage = """
             Signed in, but \(portal) did not accept the saved session (\(reason)).
             Check the portal address above is the one you actually signed in to, \
@@ -115,14 +117,66 @@ public struct K12SignInView: View {
             """
     }
 
-    /// OLS and Canvas answer on different paths, and this sheet serves both.
-    private var probePaths: [String] {
-        let host = (portal.contains("://") ? URL(string: portal)?.host : portal)?.lowercased()
+    // MARK: - Remembering the sign-in
+
+    /// Portal sessions lapse, and the cookies WebKit keeps outlive them by
+    /// weeks — but not forever, and not through a password change. Saving the
+    /// sign-in is what lets the panel recover from *any* lapse without a person
+    /// present, which is the difference between a wall display that keeps
+    /// working and one that quietly stops.
+    private var credentialSection: some View {
+        DisclosureGroup(isExpanded: $showsCredentials) {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Username", text: $username)
+                    .textContentType(.username)
+                    .autocorrectionOff()
+                SecureField("Password", text: $password)
+                    .textContentType(.password)
+                Text("""
+                    Stored in this device's Keychain only — it is never put in a board, \
+                    never exported, and never synced. Without it, Status Board can still \
+                    sign back in from the portal's own saved cookies; with it, it can \
+                    recover even after those are gone.
+                    """)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if savedUsername != nil {
+                    Button("Forget Saved Sign-in", role: .destructive) {
+                        WebClipCredentialStore.delete(host: credentialHost)
+                        savedUsername = nil
+                        username = ""
+                        password = ""
+                    }
+                    .font(.footnote)
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Label(savedUsername.map { "Sign-in saved for \($0)" } ?? "Remember my sign-in",
+                  systemImage: savedUsername == nil ? "key" : "key.fill")
+                .font(.footnote)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 8)
+    }
+
+    /// The host credentials are keyed by. The portal as typed, so it matches
+    /// what the panel is configured with — `WebClipCredentialStore` handles the
+    /// hop to the SSO host from there.
+    private var credentialHost: String {
+        (portal.contains("://") ? URL(string: portal)?.host : portal)?.lowercased()
             ?? portal.lowercased()
-        let isCanvas = host.contains("instructure.com") || host.hasPrefix("learn")
-        return isCanvas
-            ? ["/api/v1/users/self", "/api/canvas/events/classes"]
-            : ["/api/canvas/events/classes", "/api/v1/users/self"]
+    }
+
+    private func saveCredentialIfRequested() {
+        let user = username.trimmingCharacters(in: .whitespaces)
+        guard !user.isEmpty, !password.isEmpty else { return }
+        _ = WebClipCredentialStore.save(
+            WebClipCredential(host: credentialHost, username: user, password: password))
+    }
+
+    private func loadSavedCredential() {
+        savedUsername = WebClipCredentialStore.load(host: credentialHost)?.username
     }
 }
 

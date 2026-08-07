@@ -19,6 +19,10 @@ public struct DeviceLayoutEditorView: View {
     let device: SBDeviceClass
 
     @AppStorage("sb.simulator.tvSafeGuide") private var showsOverscanGuide = true
+    /// Whether the glasses stage is drawn as the lenses actually show it — one
+    /// colour, light on black. Off shows the same arrangement in full colour,
+    /// which is easier to pick panels apart in while dragging them around.
+    @AppStorage("sb.simulator.glassesMonochrome") private var showsMonochrome = true
 
     public init(model: AppModel, dashboardID: Dashboard.ID, device: SBDeviceClass) {
         self.model = model
@@ -27,6 +31,11 @@ public struct DeviceLayoutEditorView: View {
     }
 
     private var board: Dashboard? { model.store.dashboard(id: dashboardID) }
+
+    /// The single colour an Even Realities waveguide emits.
+    private static let lensGreen = Color(hex: 0x5CFF9E)
+
+    private var isMonochromePreview: Bool { device.isMonochrome && showsMonochrome }
 
     public var body: some View {
         GeometryReader { proxy in
@@ -64,6 +73,7 @@ public struct DeviceLayoutEditorView: View {
 
     private var stage: some View {
         VStack(spacing: 12) {
+            orientationPicker
             GeometryReader { proxy in
                 let size = device.nominalPointSize
                 let scale = min(proxy.size.width / size.width,
@@ -79,11 +89,35 @@ public struct DeviceLayoutEditorView: View {
         }
     }
 
+    /// Portrait and landscape are separate arrangements of the same board, so
+    /// the screens that turn get a switch between them right above the stage —
+    /// arranging one and then rotating to arrange the other is the whole point
+    /// of having both.
+    @ViewBuilder
+    private var orientationPicker: some View {
+        if device.supportsRotation {
+            Picker("Orientation", selection: Binding(
+                get: { device.orientation },
+                set: { model.layoutTarget = device.inOrientation($0) })) {
+                ForEach(SBLayoutOrientation.allCases) { orientation in
+                    Label(orientation.displayName, systemImage: orientation.symbolName)
+                        .tag(orientation)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 280)
+        }
+    }
+
     private var caption: String {
         let note = "\(device.displayName) · \(device.previewNote)"
+        // The glasses are the one screen that isn't guaranteed to be there, so
+        // their caption leads with whether anything is actually receiving this.
+        let link = device == .glasses ? " \(model.glassesLink.statusDescription)" : ""
         return model.isEditing
-            ? "\(note) — drag panels to arrange this screen"
-            : "\(note) — turn on Edit to arrange this screen"
+            ? "\(note) — drag panels to arrange this screen. Tap one for its corner grips, or nudge it with the arrow keys; hold Option to resize.\(link)"
+            : "\(note) — turn on Edit to arrange this screen.\(link)"
     }
 
     private func screen(size: CGSize, scale: CGFloat) -> some View {
@@ -92,13 +126,27 @@ public struct DeviceLayoutEditorView: View {
         // Only the layout being written is different.
         BoardView(model: model, dashboardID: dashboardID, layoutTarget: device)
             .frame(width: size.width, height: size.height)
+            // Everything on this board is about to be shrunk to fit the window.
+            // That is right for panel content and wrong for the resize grips, so
+            // they are told to draw themselves bigger by the same factor and come
+            // out the size a pointer or a fingertip actually needs. Capped, or a
+            // TV board in a narrow pane would grow grips the size of its panels.
+            .environment(\.sbEditorControlScale, min(3, 1 / max(scale, 0.05)))
+            // Everything the lenses show arrives as one colour. Drawing the
+            // stage the same way is the only way to find out, before putting a
+            // board on someone's face, that the amber accent and the teal accent
+            // are the same shade of green out there. Applied as a filter rather
+            // than a mask so panels stay draggable through it.
+            .grayscale(isMonochromePreview ? 1 : 0)
+            .contrast(isMonochromePreview ? 1.3 : 1)
+            .colorMultiply(isMonochromePreview ? Self.lensGreen : .white)
             .overlay {
-                if showsOverscanGuide, device.overscanInset != .zero {
+                if showsOverscanGuide, let guide = device.screenGuide, guide.inset != .zero {
                     Rectangle()
                         .strokeBorder(SBTheme.warn.opacity(0.55),
                                       style: StrokeStyle(lineWidth: 2, dash: [10, 8]))
-                        .padding(.horizontal, device.overscanInset.width)
-                        .padding(.vertical, device.overscanInset.height)
+                        .padding(.horizontal, guide.inset.width)
+                        .padding(.vertical, guide.inset.height)
                         .allowsHitTesting(false)
                 }
             }
@@ -117,9 +165,12 @@ public struct DeviceLayoutEditorView: View {
     @ViewBuilder
     private var options: some View {
         VStack(alignment: .leading, spacing: 22) {
+            if device == .glasses {
+                lensSection
+            }
             layoutSection
-            if device.overscanInset != .zero {
-                overscanSection
+            if let guide = device.screenGuide, guide.inset != .zero {
+                screenGuideSection(guide)
             }
             gridSection
             panelSection
@@ -127,14 +178,68 @@ public struct DeviceLayoutEditorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Everything specific to a screen that isn't this app's to draw: whether
+    /// anything is linked, whether the preview is honest about colour, and which
+    /// panels won't survive the trip.
+    private var lensSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("Glasses")
+            HStack(spacing: 8) {
+                Image(systemName: model.glassesLink.isLive
+                      ? "checkmark.circle.fill" : "eyeglasses")
+                    .foregroundStyle(model.glassesLink.isLive ? SBTheme.good : .secondary)
+                Text(model.glassesLink.statusDescription)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Toggle("Preview in Lens Green", isOn: $showsMonochrome)
+                .toggleStyle(.switch)
+            Text("The lenses emit one colour. With this on, the stage is drawn the way they will show it — turn it off while dragging panels if you want to tell them apart by colour.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if !model.glassesLink.isLive {
+                Toggle("Always Offer This Screen", isOn: Binding(
+                    get: { model.glassesLink.alwaysOffered },
+                    set: { model.glassesLink.alwaysOffered = $0 }))
+                    .toggleStyle(.switch)
+            }
+
+            if !unsupportedPanels.isEmpty {
+                Divider()
+                Text("Not shown on the glasses")
+                    .font(.callout.weight(.medium))
+                Text("A 576×288 monochrome strip can't say anything useful with these, so the arrangement leaves them out. They stay on every other screen.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(unsupportedPanels) { panel in
+                    Label("\(panel.title) · \(panel.kind.displayName)",
+                          systemImage: panel.kind.symbolName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var unsupportedPanels: [Panel] {
+        (board?.panels ?? []).filter { !device.supports($0.kind) }
+    }
+
     private var isCustom: Bool { board?.hasCustomLayout(for: device) ?? false }
+
+    /// True while this screen is still arranging itself — the state a phone, a
+    /// watch and an upright iPad are in until someone moves a panel on them.
+    private var isAutomatic: Bool { board?.usesAutomaticLayout(for: device) ?? false }
 
     private var layoutSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("Layout")
-            Text(isCustom
-                 ? "\(device.displayName) has its own arrangement. Changes here don't touch your other devices."
-                 : "\(device.displayName) follows the board's shared layout, the same one every device without its own arrangement uses. Moving a panel here gives it an arrangement of its own.")
+            Text(layoutExplanation)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -165,19 +270,38 @@ public struct DeviceLayoutEditorView: View {
             }
 
             if isCustom {
-                Button("Reset to Shared Layout", role: .destructive) {
+                Button(device.usesAutomaticLayout
+                       ? "Reset to Automatic Layout" : "Reset to Shared Layout",
+                       role: .destructive) {
                     model.store.resetLayout(in: dashboardID, on: device)
                 }
             }
         }
     }
 
-    private var overscanSection: some View {
+    private var layoutExplanation: String {
+        if isCustom {
+            return "\(device.displayName) has its own arrangement. Changes here don't touch your other devices."
+        }
+        if isAutomatic {
+            let columns = device.suggestedGrid.columns
+            let shape = columns == 1
+                ? "a single column"
+                : "\(columns) columns"
+            let inherited = device.layoutFallback.map {
+                " It starts from the \($0.displayName) arrangement and reflows it."
+            } ?? ""
+            return "\(device.displayName) arranges itself: panels reflow into \(shape) in reading order, and the board scrolls when it runs longer than the screen.\(inherited) Moving a panel here keeps what you see and makes it \(device.displayName)'s own."
+        }
+        return "\(device.displayName) follows the board's shared layout, the same one every device without its own arrangement uses. Moving a panel here gives it an arrangement of its own."
+    }
+
+    private func screenGuideSection(_ guide: SBDeviceClass.ScreenGuide) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            sectionTitle("Overscan")
-            Toggle("Show TV-Safe Guide", isOn: $showsOverscanGuide)
+            sectionTitle(guide.sectionTitle)
+            Toggle(guide.toggleTitle, isOn: $showsOverscanGuide)
                 .toggleStyle(.switch)
-            Text("Some televisions crop the edges of the picture. Anything outside the dashed line may not be visible on your Apple TV.")
+            Text(guide.explanation)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -190,7 +314,9 @@ public struct DeviceLayoutEditorView: View {
             sectionTitle("Grid")
             Stepper("Columns: \(grid.columns)") { step(columns: 1) } onDecrement: { step(columns: -1) }
             Stepper("Rows: \(grid.rows)") { step(rows: 1) } onDecrement: { step(rows: -1) }
-            Text("Panels stretch to fill the grid, so fewer rows means bigger panels.")
+            Text(device.allowsScrolling
+                 ? "Panels stretch to fill the grid, so fewer rows means bigger panels. Add more rows than fit the screen and the board scrolls instead of shrinking them."
+                 : "Panels stretch to fill the grid, so fewer rows means bigger panels. Everything has to fit the screen — there is nothing to scroll \(device == .glasses ? "on a pair of lenses" : "with from the sofa").")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -5,27 +5,91 @@ import StatusBoardKit
 
 // MARK: - Configuration intent
 
+/// A board, as offered by the widget's "Board" row.
+struct BoardEntity: AppEntity {
+    var id: String
+    var name: String
+
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Board"
+    static let defaultQuery = BoardEntityQuery()
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+
+    init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    init(_ info: WidgetBoardInfo) {
+        self.init(id: info.id, name: info.name)
+    }
+}
+
+struct BoardEntityQuery: EntityQuery {
+    func entities(for identifiers: [String]) async throws -> [BoardEntity] {
+        WidgetSharedState.load().boards
+            .filter { identifiers.contains($0.id) }
+            .map(BoardEntity.init)
+    }
+
+    func suggestedEntities() async throws -> [BoardEntity] {
+        WidgetSharedState.load().boards.map(BoardEntity.init)
+    }
+
+    func defaultResult() async -> BoardEntity? {
+        try? await suggestedEntities().first
+    }
+}
+
+/// A panel — one data source on a board — as offered by the widget's "Panel" row.
 struct PanelEntity: AppEntity {
+    /// The panel's identity, not its snapshot key: boards can share a bridge
+    /// key, and the widget has to come back to the one that was picked.
     var id: String
     var title: String
+    var boardName: String
+    var kindName: String
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Panel"
     static let defaultQuery = PanelEntityQuery()
 
+    /// The subtitle names the board, which is what tells two panels of the
+    /// same name apart when the picker is showing every board at once.
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(title)")
+        let subtitle = boardName.isEmpty ? kindName : "\(boardName) · \(kindName)"
+        return DisplayRepresentation(title: "\(title)", subtitle: "\(subtitle)")
+    }
+
+    init(_ info: WidgetPanelInfo) {
+        id = info.panelID
+        title = info.title
+        boardName = info.boardName
+        kindName = info.kind.displayName
     }
 }
 
 struct PanelEntityQuery: EntityQuery {
+    /// Narrows the panel list to the board chosen a row above it, so the edit
+    /// screen reads the way the app does: pick the board, then the data source.
+    @IntentParameterDependency<SelectPanelIntent>(\.$board)
+    var selection
+
     func entities(for identifiers: [String]) async throws -> [PanelEntity] {
-        WidgetSharedState.load().panels
-            .filter { identifiers.contains($0.key) }
-            .map { PanelEntity(id: $0.key, title: $0.title) }
+        let state = WidgetSharedState.load()
+        return identifiers.compactMap { identifier in
+            state.panels.first { $0.panelID == identifier }
+                // Widgets configured before boards were mirrored stored the
+                // snapshot key. Resolve those rather than drop the choice.
+                ?? state.panels.first { $0.key == identifier }
+        }
+        .map(PanelEntity.init)
     }
 
     func suggestedEntities() async throws -> [PanelEntity] {
-        WidgetSharedState.load().panels.map { PanelEntity(id: $0.key, title: $0.title) }
+        let state = WidgetSharedState.load()
+        return state.panels(onBoard: selection?.board.id).map(PanelEntity.init)
     }
 
     func defaultResult() async -> PanelEntity? {
@@ -35,10 +99,17 @@ struct PanelEntityQuery: EntityQuery {
 
 struct SelectPanelIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Select Panel"
-    static let description = IntentDescription("Choose which Status Board panel to display.")
+    static let description = IntentDescription("Choose which board and which of its panels to display.")
+
+    @Parameter(title: "Board")
+    var board: BoardEntity?
 
     @Parameter(title: "Panel")
     var panel: PanelEntity?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Show \(\.$panel) from \(\.$board)")
+    }
 }
 
 // MARK: - Timeline
@@ -70,24 +141,32 @@ struct PanelTimelineProvider: AppIntentTimelineProvider {
     }
 
     #if os(watchOS)
-    /// Complication gallery choices on the watch: one per panel.
+    /// Complication gallery choices on the watch: one per panel. Each carries
+    /// its board too, so editing one on the watch opens on the right board.
     func recommendations() -> [AppIntentRecommendation<SelectPanelIntent>] {
-        WidgetSharedState.load().panels.prefix(8).map { info in
+        let state = WidgetSharedState.load()
+        let showsBoard = state.boards.count > 1
+        return state.panels.prefix(8).map { info in
             let intent = SelectPanelIntent()
-            intent.panel = PanelEntity(id: info.key, title: info.title)
-            return AppIntentRecommendation(intent: intent, description: Text(info.title))
+            intent.board = BoardEntity(id: info.boardID, name: info.boardName)
+            intent.panel = PanelEntity(info)
+            let label = showsBoard && !info.boardName.isEmpty
+                ? "\(info.boardName) · \(info.title)"
+                : info.title
+            return AppIntentRecommendation(intent: intent, description: Text(label))
         }
     }
     #endif
 
     private func entry(for configuration: SelectPanelIntent) -> PanelEntry {
         let state = WidgetSharedState.load()
-        let key = configuration.panel?.id ?? state.panels.first?.key
-        let info = state.panels.first { $0.key == key }
+        let info = state.panel(id: configuration.panel?.id, onBoard: configuration.board?.id)
         return PanelEntry(date: Date(),
-                          title: configuration.panel?.title ?? info?.title ?? "Status Board",
+                          // The live mirror wins over the configuration, so a
+                          // renamed panel renames on the widget too.
+                          title: info?.title ?? configuration.panel?.title ?? "Status Board",
                           kind: info?.kind ?? .bridge,
-                          record: key.flatMap { state.records[$0] },
+                          record: info.flatMap { state.records[$0.key] },
                           settings: info?.settings ?? PanelSettings())
     }
 }
@@ -215,7 +294,7 @@ struct PanelWidgetEntryView: View {
                     .lineLimit(1)
                 Spacer(minLength: 0)
             }
-            SnapshotContentView(record: entry.record, settings: PanelSettings())
+            SnapshotContentView(record: entry.record, settings: entry.settings)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

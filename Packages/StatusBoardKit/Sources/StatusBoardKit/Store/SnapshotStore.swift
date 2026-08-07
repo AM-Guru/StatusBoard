@@ -6,7 +6,11 @@ import WidgetKit
 
 /// Panel metadata mirrored into the App Group so widgets can offer a picker.
 public struct WidgetPanelInfo: Codable, Hashable, Sendable, Identifiable {
-    public var id: String { key }
+    /// The panel's own identity. This is what the widget's configuration
+    /// stores, *not* `key`: two boards can push to the same bridge key, and a
+    /// picker whose rows collide would silently hand the widget the wrong one.
+    public var panelID: String
+    public var id: String { panelID }
     public var key: String
     public var title: String
     public var kind: PanelKind
@@ -14,13 +18,21 @@ public struct WidgetPanelInfo: Codable, Hashable, Sendable, Identifiable {
     /// does — temperature units, which home mode a reading came from, how a
     /// chart is styled. Widgets have no access to `dashboards.json`.
     public var settings: PanelSettings
+    /// The board this panel sits on, so the widget's edit screen can ask which
+    /// board first and then which panel from it.
+    public var boardID: String
+    public var boardName: String
 
-    public init(key: String, title: String, kind: PanelKind,
-                settings: PanelSettings = PanelSettings()) {
+    public init(panelID: String, key: String, title: String, kind: PanelKind,
+                settings: PanelSettings = PanelSettings(),
+                boardID: String = "", boardName: String = "") {
+        self.panelID = panelID
         self.key = key
         self.title = title
         self.kind = kind
         self.settings = settings
+        self.boardID = boardID
+        self.boardName = boardName
     }
 
     /// Hand-written so a widget still draws from a state file an older build
@@ -33,6 +45,22 @@ public struct WidgetPanelInfo: Codable, Hashable, Sendable, Identifiable {
         kind = try container.decode(PanelKind.self, forKey: .kind)
         settings = try container.decodeIfPresent(PanelSettings.self, forKey: .settings)
             ?? PanelSettings()
+        // Before boards were mirrored, the key doubled as the identity — and
+        // for every panel but a bridge one it still is the panel's UUID.
+        panelID = try container.decodeIfPresent(String.self, forKey: .panelID) ?? key
+        boardID = try container.decodeIfPresent(String.self, forKey: .boardID) ?? ""
+        boardName = try container.decodeIfPresent(String.self, forKey: .boardName) ?? ""
+    }
+}
+
+/// A board offered in the widget's board picker.
+public struct WidgetBoardInfo: Hashable, Sendable, Identifiable {
+    public var id: String
+    public var name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
     }
 }
 
@@ -52,6 +80,39 @@ public struct WidgetSharedState: Codable, Sendable {
 
     public static func load() -> WidgetSharedState {
         SBStorage.read(WidgetSharedState.self, from: fileURL) ?? WidgetSharedState()
+    }
+
+    /// The boards a widget can choose from, in board order. Derived from the
+    /// panels rather than stored, so a board only shows up once it holds
+    /// something a widget could actually display.
+    public var boards: [WidgetBoardInfo] {
+        var seen: Set<String> = []
+        var result: [WidgetBoardInfo] = []
+        for panel in panels where !panel.boardID.isEmpty {
+            guard seen.insert(panel.boardID).inserted else { continue }
+            result.append(WidgetBoardInfo(id: panel.boardID, name: panel.boardName))
+        }
+        return result
+    }
+
+    /// The panels on one board, or all of them when no board is chosen — and
+    /// also when the chosen board is gone, since a widget still pointed at a
+    /// deleted board should keep showing something rather than go blank.
+    public func panels(onBoard boardID: String?) -> [WidgetPanelInfo] {
+        guard let boardID, !boardID.isEmpty else { return panels }
+        let scoped = panels.filter { $0.boardID == boardID }
+        return scoped.isEmpty ? panels : scoped
+    }
+
+    /// Resolves a widget configuration to the panel it should draw.
+    public func panel(id: String?, onBoard boardID: String?) -> WidgetPanelInfo? {
+        let candidates = panels(onBoard: boardID)
+        guard let id else { return candidates.first }
+        return candidates.first { $0.panelID == id }
+            // Widgets configured before boards were mirrored stored the
+            // snapshot key instead of the panel's identity.
+            ?? candidates.first { $0.key == id }
+            ?? candidates.first
     }
 }
 

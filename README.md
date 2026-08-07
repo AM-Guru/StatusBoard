@@ -74,19 +74,44 @@ the developer has no way to see your data.
 - **Per-device layouts** — one board, arranged differently per screen. A 16:9 TV
   across the room and a phone in your hand rarely want the same grid, so each
   device class (Mac, iPad, iPhone, Apple TV, Watch) can carry its own panel
-  positions, grid size, and hidden panels. Devices you never customize keep
-  following the board's shared layout, so nothing changes until you ask for it.
+  positions, grid size, and hidden panels — **per orientation** on the screens
+  that turn, so an iPhone on its side and an iPhone upright are arranged
+  separately. The Mac, iPad landscape and Apple TV follow the board's shared
+  layout until you customize them. The narrow screens don't: an **iPhone and an
+  Apple Watch arrange themselves in a single column**, and an upright iPad in
+  four, reflowing the board in reading order rather than squeezing eight columns
+  into a hand. Charts, feeds and tables take a whole row rather than a sliver.
+- **Boards scroll** on Mac, iPad and iPhone. A row is never drawn shorter than
+  the screen can read, so a board with more rows than fit runs past the bottom
+  and scrolls instead of shrinking every panel into an unreadable strip. The
+  Apple TV is the exception — nobody scrolls from the sofa, so its board always
+  fits the screen exactly.
 - **Screen menu** on Mac, iPad and iPhone (toolbar dropdown beside Edit) — pick
-  This Mac, iPad, iPhone, Apple TV or Apple Watch and the whole window becomes
+  This Mac, iPad, iPhone, Apple TV, Apple Watch or a linked pair of **Smart
+  Glasses** and the whole window becomes
   that screen's layout editor: no modal, the board gets the full window. The
   board is laid out at the target screen's real point size and then scaled to
   fit, so panel text shrinks in proportion and you can tell what will be legible
   from the couch. Drag and resize panels, toggle individual panels off per
-  device, set that screen's grid, Auto-Arrange, or copy another device's
+  device, switch between **Portrait and Landscape** for the iPhone and iPad, set
+  that screen's grid, Auto-Arrange, or copy another device's
   arrangement — the options column hides with ⇧⌘D when you want the whole window
   for the board. The Apple TV layout also draws a **TV-safe guide**: anything
   outside the dashed line is at risk of being cropped by the television's
   overscan.
+- **Smart glasses** — Status Board doesn't run on a pair of Even Realities G2s;
+  [SybilSight](https://sybilsight.com) does, and it draws Status Board's boards
+  on the lenses. Turn the Mac bridge on, switch Status Board on in SybilSight,
+  and the phone subscribes to this Mac exactly the way an Apple TV does — over
+  Bonjour on the local network, no account, nothing leaving the house. Once it
+  has, a **Smart Glasses** entry appears in the screen menu and arranges the real
+  canvas: 576×288, one pixel per point, drawn in the single green a waveguide
+  emits so you can see before it reaches somebody's face that the amber accent
+  and the teal accent are now the same colour. A dashed **lens-safe guide** marks
+  the eyebox, and the panels a monochrome strip can't carry — web clips, images,
+  MCP results — are named and left out rather than sent as grey mush. The screen
+  is only offered while a pair is linked; there is a switch in the same menu to
+  arrange one before you have ever connected it.
 - Classic touches: triple-tap a panel to force-reload it; share a board as JSON
   from the toolbar.
 - **Per-panel accent colors** — pick any color in a panel's Appearance section;

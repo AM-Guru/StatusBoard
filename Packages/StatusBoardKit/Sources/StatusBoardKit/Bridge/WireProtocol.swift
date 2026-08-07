@@ -44,8 +44,48 @@ public struct WebClipSpec: Codable, Sendable, Hashable {
     }
 }
 
+/// What a subscriber says it is, sent once immediately after the handshake.
+///
+/// The handshake line itself is deliberately left alone — an older iPhone or
+/// Apple TV that never sends this still subscribes exactly as before, and is
+/// simply reported as an unnamed display. What this buys is the one thing the
+/// Mac could not otherwise know: whether a *pair of glasses* is reachable, which
+/// is what decides if the Smart Glasses screen is worth offering in the menus.
+public struct BridgeClientIdentity: Codable, Sendable, Hashable {
+    /// Stable per install, so a phone that reconnects is the same client rather
+    /// than a second one.
+    public var id: String
+    /// What to call it in the bridge console and the screen menu.
+    public var name: String
+    /// The `SBDeviceClass` raw value this client draws boards for, when it draws
+    /// them for one particular screen. `nil` for an ordinary app subscribing for
+    /// panel data.
+    public var deviceClass: String?
+    /// The app on the other end — "SybilSight", "Status Board".
+    public var app: String?
+    /// Free-text hardware description, e.g. "Even Realities G2".
+    public var hardware: String?
+
+    public init(id: String, name: String, deviceClass: String? = nil,
+                app: String? = nil, hardware: String? = nil) {
+        self.id = id
+        self.name = name
+        self.deviceClass = deviceClass
+        self.app = app
+        self.hardware = hardware
+    }
+
+    /// The screen this client renders, when it names a known one.
+    public var device: SBDeviceClass? {
+        deviceClass.flatMap(SBDeviceClass.init(rawValue:))
+    }
+}
+
 public enum BridgeMessage: Codable, Sendable {
     case hello(serverName: String)
+    /// A subscriber introducing itself. Sent by the client right after the
+    /// handshake; ignored by servers that predate it.
+    case identity(BridgeClientIdentity)
     case snapshot(key: String, record: SnapshotRecord)
     /// Every board the Mac currently holds. Sent whole rather than as a diff:
     /// boards are small, and a complete set lets a display-only device tell
@@ -58,11 +98,20 @@ public enum BridgeMessage: Codable, Sendable {
     case boards([Dashboard])
     case webClipRequest(id: String, spec: WebClipSpec)
     case webClipResponse(id: String, pngBase64: String?, error: String?)
+    /// Apple TV asking the Mac for K12 schedule data.
+    ///
+    /// The Mac answers with the *data*, not with its session: signing in needs
+    /// WebKit, which tvOS doesn't have, and the bridge is plain TCP on the
+    /// local network, which is no place to put a live session cookie. The Mac
+    /// re-authenticates on its own if its session has lapsed, so a display can
+    /// keep showing today's classes with nothing but a Mac awake in the house.
+    case k12Request(id: String, portal: String, mode: String)
+    case k12Response(id: String, record: SnapshotRecord?, error: String?)
 
     private enum CodingKeys: String, CodingKey {
         case type, serverName, key, record, id, url, width, height, zoom
         case selector, hideSelectors, blocksAds, autoLogin, pngBase64, error
-        case boards
+        case boards, portal, mode, identity
     }
 
     public init(from decoder: Decoder) throws {
@@ -71,6 +120,8 @@ public enum BridgeMessage: Codable, Sendable {
         switch type {
         case "hello":
             self = .hello(serverName: try container.decode(String.self, forKey: .serverName))
+        case "identity":
+            self = .identity(try container.decode(BridgeClientIdentity.self, forKey: .identity))
         case "snapshot":
             self = .snapshot(key: try container.decode(String.self, forKey: .key),
                              record: try container.decode(SnapshotRecord.self, forKey: .record))
@@ -93,6 +144,16 @@ public enum BridgeMessage: Codable, Sendable {
                 id: try container.decode(String.self, forKey: .id),
                 pngBase64: try container.decodeIfPresent(String.self, forKey: .pngBase64),
                 error: try container.decodeIfPresent(String.self, forKey: .error))
+        case "k12":
+            self = .k12Request(
+                id: try container.decode(String.self, forKey: .id),
+                portal: try container.decode(String.self, forKey: .portal),
+                mode: try container.decodeIfPresent(String.self, forKey: .mode) ?? "")
+        case "k12Result":
+            self = .k12Response(
+                id: try container.decode(String.self, forKey: .id),
+                record: try container.decodeIfPresent(SnapshotRecord.self, forKey: .record),
+                error: try container.decodeIfPresent(String.self, forKey: .error))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: container,
                                                    debugDescription: "Unknown message type \(type)")
@@ -105,6 +166,9 @@ public enum BridgeMessage: Codable, Sendable {
         case .hello(let serverName):
             try container.encode("hello", forKey: .type)
             try container.encode(serverName, forKey: .serverName)
+        case .identity(let identity):
+            try container.encode("identity", forKey: .type)
+            try container.encode(identity, forKey: .identity)
         case .snapshot(let key, let record):
             try container.encode("snapshot", forKey: .type)
             try container.encode(key, forKey: .key)
@@ -129,6 +193,16 @@ public enum BridgeMessage: Codable, Sendable {
             try container.encode("webclipResult", forKey: .type)
             try container.encode(id, forKey: .id)
             try container.encodeIfPresent(pngBase64, forKey: .pngBase64)
+            try container.encodeIfPresent(error, forKey: .error)
+        case .k12Request(let id, let portal, let mode):
+            try container.encode("k12", forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encode(portal, forKey: .portal)
+            try container.encode(mode, forKey: .mode)
+        case .k12Response(let id, let record, let error):
+            try container.encode("k12Result", forKey: .type)
+            try container.encode(id, forKey: .id)
+            try container.encodeIfPresent(record, forKey: .record)
             try container.encodeIfPresent(error, forKey: .error)
         }
     }

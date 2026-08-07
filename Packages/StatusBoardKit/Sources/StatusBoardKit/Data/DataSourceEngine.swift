@@ -76,6 +76,32 @@ public final class DataSourceEngine {
         snapshots.set(snapshot, for: panel.snapshotKey)
     }
 
+    /// Runs a K12-backed fetch, falling back to the Mac bridge when this device
+    /// couldn't do it itself.
+    ///
+    /// On Apple TV that is the normal case rather than an edge one: the portal
+    /// hands out sessions through a web view, and tvOS has no WebKit. The TV
+    /// still tries first — a session synced from iPhone or Mac through the
+    /// private iCloud database is usually enough — and only asks the Mac when
+    /// that comes back with nothing.
+    private func k12(settings: PanelSettings,
+                     _ local: () async -> DataSnapshot) async -> DataSnapshot {
+        let snapshot = await local()
+        #if os(tvOS)
+        guard case .error = snapshot else { return snapshot }
+        guard let bridgeClient, bridgeClient.isConnected else { return snapshot }
+        let connector = settings.connector ?? ConnectorConfig()
+        let portal = connector.projectURL?.trimmingCharacters(in: .whitespaces).isEmpty == false
+            ? connector.projectURL! : K12Session.defaultPortal
+        // Whatever the Mac says wins, including its error: it's the device that
+        // owns the sign-in, so its explanation is the more useful one. Only a
+        // bridge that didn't answer at all leaves the local error standing.
+        return await bridgeClient.requestK12(portal: portal, mode: connector.mode) ?? snapshot
+        #else
+        return snapshot
+        #endif
+    }
+
     private func fetch(panel: Panel) async -> DataSnapshot? {
         switch panel.kind {
         case .weather:
@@ -123,11 +149,15 @@ public final class DataSourceEngine {
         case .canvas:
             return await CanvasSource.fetch(settings: panel.settings)
         case .k12schedule:
-            return await K12OLSSource.fetch(settings: panel.settings)
+            return await k12(settings: panel.settings) {
+                await K12OLSSource.fetch(settings: panel.settings)
+            }
         case .grades:
             return await GradesSource.fetch(settings: panel.settings)
         case .schedule:
-            return await ScheduleSource.fetch(settings: panel.settings)
+            return await k12(settings: panel.settings) {
+                await ScheduleSource.fetch(settings: panel.settings)
+            }
         case .assignments:
             return await AssignmentsSource.fetch(settings: panel.settings)
         case .tessie:

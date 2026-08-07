@@ -1,0 +1,482 @@
+[
+  {
+    "id": "01-one-screen",
+    "platform": "iphone",
+    "field": 0,
+    "source": "iphone-board-home.png",
+    "eyebrow": "STATUS BOARD &middot; iPhone",
+    "headline": [
+      "Everything",
+      "at a glance."
+    ],
+    "sub": "The house, the sky, the day &mdash; on one screen.",
+    "body": "Weather, clocks, countdowns, thermostats, room temperatures, your Mac&rsquo;s vitals. Panels refresh themselves and keep refreshing while the board is up.",
+    "howto": [
+      "Tap + to add a panel, then pick what it shows",
+      "Drag a panel to move it, pull its corner to resize"
+    ]
+  },
+  {
+    "id": "02-a-board-for-each",
+    "platform": "iphone",
+    "field": 1,
+    "source": "iphone-board-school.png",
+    "eyebrow": "STATUS BOARD &middot; iPhone",
+    "headline": [
+      "A board for",
+      "each part",
+      "of your life."
+    ],
+    "sub": "Keep as many as you like. Switch in a tap.",
+    "body": "School on one, the house on another, your servers on a third. Every board syncs over your private iCloud, so the one you build on the Mac is already on the phone.",
+    "howto": [
+      "Tap the back arrow for the list of boards",
+      "Long-press a board to rename, duplicate or delete"
+    ]
+  },
+  {
+    "id": "03-themes",
+    "platform": "iphone",
+    "field": 3,
+    "source": "iphone-board-themes.png",
+    "eyebrow": "STATUS BOARD &middot; iPhone",
+    "headline": [
+      "Nine themes.",
+      "Six wallpapers."
+    ],
+    "sub": "Set the whole board, or one panel at a time.",
+    "body": "A theme decides background, panel fill, border and type colour together. Any single panel can break ranks &mdash; go frosted, transparent, or paint its own gradient.",
+    "howto": [
+      "Tap the palette to open Board Appearance",
+      "Pick a theme, add a wallpaper, then set the scrim"
+    ]
+  },
+  {
+    "id": "04-glass",
+    "platform": "iphone",
+    "field": 2,
+    "source": "iphone-board-glass.png",
+    "eyebrow": "STATUS BOARD &middot; iPhone",
+    "headline": [
+      "One picture,",
+      "cut across",
+      "the board."
+    ],
+    "sub": "Panels that show their own slice of the wallpaper.",
+    "body": "Set a panel to Board Image and it masks the board&rsquo;s backdrop in place, lined up with its neighbours. Move it and the picture re-cuts. Frost the rest and the whole thing reads as glass.",
+    "howto": [
+      "Panel &rsaquo; Appearance &rsaquo; Background &rsaquo; Board Image",
+      "Raise the scrim until the numbers read clearly"
+    ]
+  },
+  {
+    "id": "05-mac-vitals",
+    "platform": "iphone",
+    "field": 4,
+    "source": "iphone-board-mac-vitals.png",
+    "eyebrow": "STATUS BOARD &middot; iPhone",
+    "headline": [
+      "Your Mac,",
+      "on your",
+      "phone."
+    ],
+    "sub": "CPU, memory, disk and network, live.",
+    "body": "The Mac app publishes its own vitals over your local network &mdash; no account, no server in the middle. Twelve chart styles and seven progress meters to draw them with.",
+    "howto": [
+      "Open Status Board on the Mac to start the bridge",
+      "The phone finds it on the network by itself"
+    ]
+  },
+  {
+    "id": "06-world-clocks",
+    "platform": "iphone",
+    "field": 5,
+    "source": "iphone-board-world-clocks.png",
+    "eyebrow": "STATUS BOARD &middot; iPhone",
+    "headline": [
+      "Built from",
+      "28 kinds",
+      "of panel."
+    ],
+    "sub": "Clocks, feeds, graphs, tables, web clips and more.",
+    "body": "Weather, calendar, health, GitHub, App Store Connect, Home Assistant, Nest, HomeKit, Tesla, Canvas grades and schedules &mdash; or any JSON URL you point it at.",
+    "howto": [
+      "Tap + &rsaquo; choose a kind &rsaquo; fill in the source",
+      "Set a refresh interval per panel, from seconds to hours"
+    ]
+  },
+  {
+    "id": "07-appearance",
+    "platform": "iphone",
+    "field": 2,
+    "source": "iphone-appearance.png",
+    "eyebrow": "STATUS BOARD · iPhone",
+    "headline": [
+      "Change the",
+      "whole board",
+      "in two taps."
+    ],
+    "sub": "Theme, wallpaper, base colour, gradient, scrim.",
+    "body": "Board Appearance sets the look of everything at once, and “Apply to panels” decides whether panels follow along. Any panel that has chosen a theme of its own always keeps it.",
+    "howto": [
+      "Tap the palette in the toolbar",
+      "Pick a theme, then add a wallpaper underneath"
+    ]
+  },
+  {
+    "id": "01-the-whole-wall",
+    "platform": "ipad",
+    "field": 0,
+    "source": "ipad-board-home.png",
+    "eyebrow": "STATUS BOARD &middot; iPad",
+    "headline": [
+      "The whole wall,",
+      "on one screen."
+    ],
+    "sub": "A grid you arrange yourself, at any size.",
+    "body": "Drop panels onto the grid, drag them where you want them, and let the board fill the display. Leave the iPad on a stand and it keeps itself up to date all day.",
+    "howto": [
+      "Drag a panel to move it; drag its corner to resize",
+      "Pinch the grid to add rows and columns"
+    ]
+  },
+  {
+    "id": "02-boards-in-the-sidebar",
+    "platform": "ipad",
+    "field": 1,
+    "source": "ipad-board-school.png",
+    "eyebrow": "STATUS BOARD &middot; iPad",
+    "headline": [
+      "Alternate",
+      "dashboards,",
+      "one tap apart."
+    ],
+    "sub": "The sidebar holds every board you have made.",
+    "body": "Grades, today&rsquo;s classes and what is still owed on one board; the house on the next. Rename, duplicate or delete from the same list, and iCloud carries the change everywhere.",
+    "howto": [
+      "Tap a board in the sidebar to switch to it",
+      "Command-N makes a new one; the + menu has starter boards"
+    ]
+  },
+  {
+    "id": "03-editing",
+    "platform": "ipad",
+    "field": 2,
+    "source": "ipad-inspector.png",
+    "eyebrow": "STATUS BOARD &middot; iPad",
+    "headline": [
+      "Every panel,",
+      "editable",
+      "in place."
+    ],
+    "sub": "Kind, source, refresh, renderer, colour.",
+    "body": "Open a panel and change what it reads, how often, and how it draws. Chart style, progress format, accent colour and background are all per panel &mdash; nothing is baked into the theme.",
+    "howto": [
+      "Tap a panel to select it, then tap Edit",
+      "Command-D duplicates; Shift-Command-C and Shift-Command-V copy between boards"
+    ]
+  },
+  {
+    "id": "04-device-layouts",
+    "platform": "ipad",
+    "field": 3,
+    "source": "ipad-device-layouts.png",
+    "eyebrow": "STATUS BOARD &middot; iPad",
+    "headline": [
+      "Lay out every",
+      "screen its",
+      "own way."
+    ],
+    "sub": "One board. A different arrangement per device.",
+    "body": "A Mac has room for fourteen panels; a watch has room for one. Give each device class its own layout &mdash; and preview it at that device&rsquo;s real point size before you ever look at the hardware.",
+    "howto": [
+      "Shift-Command-D opens the device preview",
+      "Pick Mac, iPad, iPhone, TV or Watch and rearrange"
+    ]
+  },
+  {
+    "id": "05-themes",
+    "platform": "ipad",
+    "field": 4,
+    "source": "ipad-board-themes.png",
+    "eyebrow": "STATUS BOARD &middot; iPad",
+    "headline": [
+      "Nine themes,",
+      "and room",
+      "to disagree."
+    ],
+    "sub": "Status Board, Glass, Carbon, Slate, Paper, Terminal, Blueprint, Sunset, Aurora.",
+    "body": "Pick one for the board and it sets everything at once. Then override any panel that wants to stand out &mdash; or turn the theme off and choose every colour yourself.",
+    "howto": [
+      "Board Appearance sets the theme, wallpaper and scrim",
+      "Panel &rsaquo; Appearance overrides just that panel"
+    ]
+  },
+  {
+    "id": "06-glass",
+    "platform": "ipad",
+    "field": 5,
+    "source": "ipad-board-glass.png",
+    "eyebrow": "STATUS BOARD &middot; iPad",
+    "headline": [
+      "Frosted,",
+      "masked,",
+      "or invisible."
+    ],
+    "sub": "Backgrounds that do more than sit behind the numbers.",
+    "body": "Solid, gradient, image, blur, transparent &mdash; or Board Image, where each panel shows its own aligned slice of one wallpaper and the gaps between panels cut into the picture.",
+    "howto": [
+      "Set the board wallpaper first, then the panel style",
+      "Blur and scrim keep text legible over a busy image"
+    ]
+  },
+  {
+    "id": "01-hero",
+    "platform": "mac",
+    "field": 0,
+    "source": "mac-board-home.png",
+    "eyebrow": "STATUS BOARD &middot; macOS",
+    "headline": [
+      "Build the board.",
+      "Put it everywhere."
+    ],
+    "sub": "The Mac is where boards are made.",
+    "body": "Lay panels out on a grid, point them at whatever you want to watch, and the same board appears on your iPhone, iPad, Apple TV and Watch through your own private iCloud.",
+    "howto": [
+      "Command-N for a new board, + for a panel",
+      "Command-Z and Shift-Command-Z undo and redo every edit"
+    ]
+  },
+  {
+    "id": "02-alternate-dashboards",
+    "platform": "mac",
+    "field": 1,
+    "source": "mac-board-school.png",
+    "eyebrow": "STATUS BOARD &middot; macOS",
+    "headline": [
+      "Alternate",
+      "dashboards."
+    ],
+    "sub": "As many boards as you have things to watch.",
+    "body": "Keep the house on one, school on another, your build servers on a third. The sidebar switches between them; Spotlight finds them by name, and Handoff picks one up on the next device.",
+    "howto": [
+      "The + menu ships starter boards to build from",
+      "Right-click a board to rename, duplicate or delete"
+    ]
+  },
+  {
+    "id": "03-editing",
+    "platform": "mac",
+    "field": 2,
+    "source": "mac-editing.png",
+    "eyebrow": "STATUS BOARD &middot; macOS",
+    "headline": [
+      "Edit in place.",
+      "Every panel,",
+      "every pixel."
+    ],
+    "sub": "28 panel kinds, 12 chart styles, 7 progress meters.",
+    "body": "Turn on Edit and every panel grows handles: drag to move, pull the corner to resize, hit the dial to change what it reads and how it draws. Command-Z undoes any of it.",
+    "howto": [
+      "Command-E toggles Edit; the toolbar has it too",
+      "Alert above / below turns any number into a notification"
+    ]
+  },
+  {
+    "id": "04-glass",
+    "platform": "mac",
+    "field": 3,
+    "source": "mac-board-glass.png",
+    "eyebrow": "STATUS BOARD · macOS",
+    "headline": [
+      "One picture,",
+      "cut across",
+      "the board."
+    ],
+    "sub": "Panels that show their own slice of the wallpaper.",
+    "body": "Set a panel to Board Image and it masks the board’s backdrop in place, lined up with its neighbours. Move it and the picture re-cuts. Frost the rest and the whole thing reads as glass.",
+    "howto": [
+      "Panel › Appearance › Background › Board Image",
+      "Raise the scrim until the numbers read clearly"
+    ]
+  },
+  {
+    "id": "05-themes",
+    "platform": "mac",
+    "field": 4,
+    "source": "mac-board-themes.png",
+    "eyebrow": "STATUS BOARD &middot; macOS",
+    "headline": [
+      "Nine themes.",
+      "Or none at all."
+    ],
+    "sub": "Status Board, Glass, Carbon, Slate, Paper, Terminal, Blueprint, Sunset, Aurora.",
+    "body": "Every theme sets background, panel fill, border and type together, light or dark. Add one of six wallpapers underneath, then dial the scrim until the numbers read the way you want.",
+    "howto": [
+      "Board Appearance is in the toolbar and the Board menu",
+      "Custom lets you set every colour by hand"
+    ]
+  },
+  {
+    "id": "06-bridge",
+    "platform": "mac",
+    "field": 5,
+    "source": "mac-board-mac-vitals.png",
+    "eyebrow": "STATUS BOARD &middot; macOS",
+    "headline": [
+      "Your Mac,",
+      "on every",
+      "other screen."
+    ],
+    "sub": "CPU, memory, disk, network and uptime, published live.",
+    "body": "The Mac app runs a small bridge on your own network and offers itself over Bonjour. The Apple TV and the iPhone find it by themselves. Nothing leaves the house, and there is no account to make.",
+    "howto": [
+      "Nothing to set up &mdash; open the Mac app and it publishes",
+      "The sbctl tool pushes your own values onto any panel"
+    ]
+  },
+  {
+    "id": "01-hero",
+    "platform": "appletv",
+    "field": 0,
+    "source": "appletv-board-home.png",
+    "eyebrow": "STATUS BOARD &middot; Apple TV",
+    "headline": [
+      "The big screen,",
+      "finally useful."
+    ],
+    "sub": "Your board, full size, all day.",
+    "body": "Weather, the house, the schedule and your Mac&rsquo;s vitals on the television nobody is watching. Boards arrive from iCloud &mdash; the Apple TV displays them, so there is nothing to set up on it.",
+    "howto": [
+      "Sign in to the same iCloud account and wait a moment",
+      "Boards you make on the Mac appear here by themselves"
+    ]
+  },
+  {
+    "id": "02-alternate-dashboards",
+    "platform": "appletv",
+    "field": 1,
+    "source": "appletv-board-school.png",
+    "eyebrow": "STATUS BOARD &middot; Apple TV",
+    "headline": [
+      "Pick a board,",
+      "or cycle them all."
+    ],
+    "sub": "Pin one to this TV, or let it rotate.",
+    "body": "Choose which board this Apple TV shows and it stays chosen &mdash; even after the board arrives again from another device. Or set an interval and let it move through every board on its own.",
+    "howto": [
+      "Press Menu for the board list and settings",
+      "Auto-cycle rotates boards on a timer you choose"
+    ]
+  },
+  {
+    "id": "03-themes",
+    "platform": "appletv",
+    "field": 4,
+    "source": "appletv-board-themes.png",
+    "eyebrow": "STATUS BOARD &middot; Apple TV",
+    "headline": [
+      "Nine themes,",
+      "made for a room."
+    ],
+    "sub": "Bright enough to read from the sofa.",
+    "body": "Each theme sets the whole board together, and the TV layout respects the title-safe area so nothing important sits under the bezel. Turn that off when the screen has no overscan to fight.",
+    "howto": [
+      "Set the theme on the Mac; the TV picks it up",
+      "Fill Screen in TV settings uses the full panel edge to edge"
+    ]
+  },
+  {
+    "id": "04-glass",
+    "platform": "appletv",
+    "field": 2,
+    "source": "appletv-board-glass.png",
+    "eyebrow": "STATUS BOARD &middot; Apple TV",
+    "headline": [
+      "A wallpaper",
+      "worth leaving on."
+    ],
+    "sub": "Frosted panels over one moving picture.",
+    "body": "Aurora, Dusk, Grid, Starfield, Topography and Halftone animate quietly behind the board. Panels can frost over them or cut their own slice out of them &mdash; on a 4K screen the difference shows.",
+    "howto": [
+      "Board Appearance &rsaquo; Wallpaper, then set Animates",
+      "Reduce Motion is honoured; the picture holds still"
+    ]
+  },
+  {
+    "id": "05-mac-vitals",
+    "platform": "appletv",
+    "field": 5,
+    "source": "appletv-board-mac-vitals.png",
+    "eyebrow": "STATUS BOARD &middot; Apple TV",
+    "headline": [
+      "Watch the build",
+      "from the sofa."
+    ],
+    "sub": "The Mac bridge reaches the television too.",
+    "body": "CPU, memory, disk and network stream from the Mac over your own network. The Mac also renders web pages offscreen and sends them across, so a web clip works on a TV that has no browser.",
+    "howto": [
+      "Open Status Board on the Mac; the TV finds it",
+      "Web-clip panels are rendered by the Mac and relayed"
+    ]
+  },
+  {
+    "id": "01-on-your-wrist",
+    "platform": "watch",
+    "field": 0,
+    "source": "watch-board-home.png",
+    "eyebrow": "STATUS BOARD",
+    "headline": [
+      "On your",
+      "wrist."
+    ],
+    "sub": "The same board, one panel at a time.",
+    "body": "",
+    "howto": []
+  },
+  {
+    "id": "02-tap-for-detail",
+    "platform": "watch",
+    "field": 2,
+    "source": "watch-detail.png",
+    "eyebrow": "STATUS BOARD",
+    "headline": [
+      "Tap for",
+      "the detail."
+    ],
+    "sub": "Full screen, full size, no squinting.",
+    "body": "",
+    "howto": []
+  },
+  {
+    "id": "03-school",
+    "platform": "watch",
+    "field": 1,
+    "source": "watch-board-school.png",
+    "eyebrow": "STATUS BOARD",
+    "headline": [
+      "Every board",
+      "you own."
+    ],
+    "sub": "Arrives from iCloud. Nothing to set up.",
+    "body": "",
+    "howto": []
+  },
+  {
+    "id": "06-world-clocks",
+    "platform": "appletv",
+    "field": 3,
+    "source": "appletv-board-world-clocks.png",
+    "eyebrow": "STATUS BOARD · Apple TV",
+    "headline": [
+      "28 kinds of panel,",
+      "on a 4K screen."
+    ],
+    "sub": "Clocks, weather, graphs, tables, feeds, web clips.",
+    "body": "Everything the Mac and iPhone can show, the television shows too — including web pages, which the Mac renders offscreen and relays, so a panel of live web content works on a device with no browser at all.",
+    "howto": [
+      "Build the board anywhere; the TV just displays it",
+      "Auto-cycle moves through your boards on a timer"
+    ]
+  }
+]

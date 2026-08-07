@@ -351,6 +351,17 @@ public struct PanelSettings: Codable, Hashable, Sendable {
     // Clock
     public var timeZoneID: String?
     public var showsSeconds: Bool = true
+    /// Which face the clock draws. Defaults to the classic LCD, so every clock
+    /// saved before faces existed keeps the look it had.
+    public var clockStyle: ClockStyle = .lcd
+    public var clockHourFormat: ClockHourFormat = .automatic
+    /// The date line under the time. Off suits a small panel or a face that is
+    /// already busy.
+    public var showsClockDate: Bool = true
+    /// Draw the sun's position and the night wedge on faces that can use them.
+    /// The coordinates come from the shared `latitude` / `longitude` fields, so
+    /// a clock and a weather panel pick their place the same way.
+    public var showsSunPosition: Bool = true
 
     // Weather
     /// Resolved coordinates. Always filled in for a working panel, whatever
@@ -525,7 +536,8 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         case webClipZoom, webClipSelector, webClipHideSelectors, webClipBlocksAds
         case webClipAutoLogin
         case imageFilter
-        case timeZoneID, showsSeconds
+        case timeZoneID, showsSeconds, clockStyle, clockHourFormat
+        case showsClockDate, showsSunPosition
         case latitude, longitude, locationName
         case calendarDaysAhead, listDisplay, healthMetric, courseAliases, hiddenCourses
         case feedSources, feedShowsSourceIcons, feedShowsSourceNames
@@ -562,6 +574,19 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         imageFilter = try container.decodeIfPresent(String.self, forKey: .imageFilter)
         timeZoneID = try container.decodeIfPresent(String.self, forKey: .timeZoneID)
         showsSeconds = try container.decodeIfPresent(Bool.self, forKey: .showsSeconds) ?? true
+        // A face this build doesn't know falls back to the LCD rather than
+        // failing the whole panel — same rule as every other enum here.
+        clockStyle = (try? container.decodeIfPresent(ClockStyle.self, forKey: .clockStyle))
+            .flatMap { $0 } ?? .lcd
+        // A panel saved before faces existed was drawn as "HH:mm" whatever the
+        // region said, so that is what it decodes to — a clock that has been
+        // reading 13:42 for a year must not quietly become 1:42 PM. New panels
+        // start on `.automatic` instead, from the property's own default.
+        clockHourFormat = (try? container.decodeIfPresent(ClockHourFormat.self,
+                                                          forKey: .clockHourFormat))
+            .flatMap { $0 } ?? .twentyFour
+        showsClockDate = try container.decodeIfPresent(Bool.self, forKey: .showsClockDate) ?? true
+        showsSunPosition = try container.decodeIfPresent(Bool.self, forKey: .showsSunPosition) ?? true
         latitude = try container.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try container.decodeIfPresent(Double.self, forKey: .longitude)
         locationName = try container.decodeIfPresent(String.self, forKey: .locationName)

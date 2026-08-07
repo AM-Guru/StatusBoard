@@ -15,6 +15,10 @@ public enum SBThemeName: String, Codable, CaseIterable, Sendable, Identifiable {
     case blueprint
     case sunset
     case aurora
+    /// Deep indigo with an ice-blue accent, after the night watch faces.
+    case nocturne
+    /// A warm dawn — the one light theme that isn't paper white.
+    case daybreak
     case custom
 
     public var id: String { rawValue }
@@ -30,6 +34,8 @@ public enum SBThemeName: String, Codable, CaseIterable, Sendable, Identifiable {
         case .blueprint: return "Blueprint"
         case .sunset: return "Sunset"
         case .aurora: return "Aurora"
+        case .nocturne: return "Nocturne"
+        case .daybreak: return "Daybreak"
         case .custom: return "Custom"
         }
     }
@@ -83,6 +89,16 @@ public enum SBThemeName: String, Codable, CaseIterable, Sendable, Identifiable {
                              border: 0x1E5A5A, textPrimary: 0xE6FFF7,
                              textSecondary: 0x9BD3C4, accent: 0x5EE7B0,
                              cornerRadius: 16, isLight: false)
+        case .nocturne:
+            return SBPalette(background: [0x141B3A, 0x0A1026], boardBackground: [0x05070F, 0x101A3A],
+                             border: 0x2C3A6B, textPrimary: 0xE9F0FF,
+                             textSecondary: 0x93A6D4, accent: 0x76B6FF,
+                             cornerRadius: 18, isLight: false)
+        case .daybreak:
+            return SBPalette(background: [0xFFF6EA, 0xFFE7D2], boardBackground: [0xFFE3C8, 0xF8B98A],
+                             border: 0xE4C6A6, textPrimary: 0x2B1B10,
+                             textSecondary: 0x7A5C46, accent: 0xD9541E,
+                             cornerRadius: 16, isLight: true)
         }
     }
 }

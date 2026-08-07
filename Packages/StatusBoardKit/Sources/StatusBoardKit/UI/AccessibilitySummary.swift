@@ -124,11 +124,7 @@ public enum AccessibilitySummary {
 
         switch panel.kind {
         case .clock:
-            let zone = panel.settings.timeZoneID.flatMap(TimeZone.init(identifier:)) ?? .current
-            let formatter = DateFormatter()
-            formatter.timeZone = zone
-            formatter.timeStyle = .short
-            return "\(title). \(formatter.string(from: Date()))"
+            return clockLabel(panel, title: title, now: Date())
 
         case .countdown:
             guard let target = panel.settings.targetDate else {
@@ -184,6 +180,34 @@ public enum AccessibilitySummary {
         case "°", "°C": return "\(text) degrees"
         default: return "\(text) \(unit)"
         }
+    }
+
+    /// A clock reads out its time — and, on the faces built around the sun,
+    /// the sunrise and sunset the sighted view is drawing. `now` is a
+    /// parameter so this is testable.
+    static func clockLabel(_ panel: Panel, title: String, now: Date) -> String {
+        let settings = panel.settings
+        let zone = settings.timeZoneID.flatMap(TimeZone.init(identifier:)) ?? .current
+        let formatter = DateFormatter()
+        formatter.timeZone = zone
+        formatter.timeStyle = .short
+        var text = "\(title). \(formatter.string(from: now))"
+
+        guard settings.clockStyle.usesLocation, settings.showsSunPosition,
+              let latitude = settings.latitude, let longitude = settings.longitude else {
+            return text
+        }
+        let solar = SolarCalculator.day(containing: now, latitude: latitude,
+                                        longitude: longitude, timeZone: zone)
+        if solar.isPolarDay {
+            text += ". The sun does not set today"
+        } else if solar.isPolarNight {
+            text += ". The sun does not rise today"
+        } else if let sunrise = solar.sunrise, let sunset = solar.sunset {
+            text += ". Sunrise \(formatter.string(from: sunrise)),"
+            text += " sunset \(formatter.string(from: sunset))"
+        }
+        return text
     }
 
     static func count(_ value: Int, _ noun: String) -> String {

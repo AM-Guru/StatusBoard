@@ -121,11 +121,7 @@ public struct PanelInspectorView: View {
     private var kindSections: some View {
         switch draft.kind {
         case .clock:
-            Section("Clock") {
-                TextField("Time zone ID (e.g. Europe/Paris)",
-                          text: optionalString($draft.settings.timeZoneID))
-                Toggle("Show seconds", isOn: $draft.settings.showsSeconds)
-            }
+            clockSections
 
         case .weather:
             WeatherLocationSection(settings: $draft.settings)
@@ -340,18 +336,7 @@ public struct PanelInspectorView: View {
                             canvasConnector.wrappedValue.projectURL = K12Session.defaultPortal
                         }
                     }
-                LabeledContent("Sign-in") {
-                    switch K12Session.shared.state {
-                    case .signedIn:
-                        Label("Connected", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(SBTheme.good)
-                    case .expired:
-                        Label("Expired", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(SBTheme.warn)
-                    case .signedOut:
-                        Text("Not signed in").foregroundStyle(.secondary)
-                    }
-                }
+                k12SignInStatus
                 Button(K12Session.shared.isSignedIn ? "Sign In Again…" : "Sign In to K12…") {
                     showingK12SignIn = true
                 }
@@ -382,6 +367,87 @@ public struct PanelInspectorView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    // MARK: - Clock
+
+    /// The face, then the options that face actually uses. Sun faces need a
+    /// place, so they borrow the weather panel's location picker.
+    @ViewBuilder
+    private var clockSections: some View {
+        let style = draft.settings.clockStyle
+        Section("Face") {
+            Picker("Face", selection: Binding(
+                get: { draft.settings.clockStyle },
+                set: { newStyle in
+                    draft.settings.clockStyle = newStyle
+                    resizeForClockFace(newStyle)
+                })) {
+                ForEach(ClockStyle.allCases) { face in
+                    Label(face.displayName, systemImage: face.symbolName).tag(face)
+                }
+            }
+            Text(clockFaceExplanation)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        Section("Clock") {
+            Picker("Hours", selection: $draft.settings.clockHourFormat) {
+                ForEach(ClockHourFormat.allCases) { format in
+                    Text(format.displayName).tag(format)
+                }
+            }
+            .pickerStyle(.segmented)
+            TextField("Time zone ID (e.g. Europe/Paris)",
+                      text: optionalString($draft.settings.timeZoneID))
+            if style.supportsSeconds {
+                Toggle("Show seconds", isOn: $draft.settings.showsSeconds)
+            }
+            if style != .sunTimes && style != .sunArc {
+                Toggle("Show date", isOn: $draft.settings.showsClockDate)
+            }
+            if style.usesLocation && !style.needsLocation {
+                Toggle("Show the sun's position", isOn: $draft.settings.showsSunPosition)
+            }
+        }
+        if style.usesLocation {
+            WeatherLocationSection(settings: $draft.settings,
+                                   modes: [.coordinates, .place, .current],
+                                   showsUnits: false)
+            Section {
+                Text("Sunrise and sunset are worked out on this device from the date and these coordinates — nothing is looked up over the network.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var clockFaceExplanation: String {
+        switch draft.settings.clockStyle {
+        case .lcd: return "Big LCD digits over a date line — the classic Status Board clock."
+        case .flip: return "A split-flap board: each digit on its own card, flipping as it changes."
+        case .analog: return "Hands on a tick dial, sized to the panel. Squarer panels suit it best."
+        case .dial: return "The whole day on one ring, midnight at the bottom and noon at the top, with daylight drawn as an arc when a location is set."
+        case .modular: return "Oversized time with the weekday, date and seconds arranged around it — widest at three or more cells across."
+        case .sunArc: return "The sun's path across the panel: sunrise at one end, sunset at the other, and the sun where it is now."
+        case .sunTimes: return "Sunrise and sunset as times, with a bar showing how much daylight is left."
+        }
+    }
+
+    /// Faces have very different natural shapes, so choosing one grows a panel
+    /// that is too small for it. Nothing is ever shrunk, nothing grows past the
+    /// board, and a panel with a neighbour in the way is left exactly as it is
+    /// — a face change must never shuffle the board underneath the user.
+    private func resizeForClockFace(_ style: ClockStyle) {
+        guard let board = model.store.dashboard(id: dashboardID) else { return }
+        let suggested = style.suggestedSize
+        var frame = draft.frame
+        frame.width = min(max(frame.width, suggested.width), board.grid.columns)
+        frame.height = min(max(frame.height, suggested.height), board.grid.rows)
+        frame = frame.clamped(to: board.grid)
+        let others = board.panels.filter { $0.id != draft.id }
+        guard !others.contains(where: { $0.frame.intersects(frame) }) else { return }
+        draft.frame = frame
     }
 
     // MARK: - Feeds
@@ -758,18 +824,7 @@ public struct PanelInspectorView: View {
                         connector.wrappedValue.mode = K12OLSSource.Mode.todayClasses.rawValue
                     }
                 }
-                LabeledContent("Sign-in") {
-                    switch K12Session.shared.state {
-                    case .signedIn:
-                        Label("Connected", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(SBTheme.good)
-                    case .expired:
-                        Label("Expired", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(SBTheme.warn)
-                    case .signedOut:
-                        Text("Not signed in").foregroundStyle(.secondary)
-                    }
-                }
+                k12SignInStatus
                 Button(K12Session.shared.isSignedIn ? "Sign In Again…" : "Sign In to K12…") {
                     showingK12SignIn = true
                 }
@@ -910,6 +965,38 @@ public struct PanelInspectorView: View {
               systemImage: "link")
             .font(.footnote)
             .foregroundStyle(.secondary)
+    }
+
+    /// Where the K12 sign-in stands, shared by the Schedule and K12 panels.
+    ///
+    /// "Expired" used to be the end of the story — someone had to come back and
+    /// sign in by hand. The panel now renews the session on its own, so what
+    /// this reports is whether that is working, not just whether the last call
+    /// happened to succeed.
+    @ViewBuilder
+    private var k12SignInStatus: some View {
+        LabeledContent("Sign-in") {
+            switch K12Session.shared.state {
+            case .signedIn:
+                Label("Connected", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(SBTheme.good)
+            case .expired:
+                if K12Session.shared.canRecover {
+                    Label("Reconnecting", systemImage: "arrow.clockwise")
+                        .foregroundStyle(SBTheme.warn)
+                } else {
+                    Label("Expired", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(SBTheme.warn)
+                }
+            case .signedOut:
+                Text("Not signed in").foregroundStyle(.secondary)
+            }
+        }
+        if let last = K12Session.shared.lastRecovery {
+            Text("Signed back in automatically \(last.formatted(.relative(presentation: .named))).")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// Publishes the credentials typed here to every other Canvas panel, so a

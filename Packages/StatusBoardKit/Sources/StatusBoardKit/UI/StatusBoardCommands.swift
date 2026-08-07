@@ -20,6 +20,7 @@ public struct StatusBoardCommands: Commands {
             Menu("New Board from Sample") {
                 Button("Mac Vitals") { model.store.add(.macVitals()) }
                 Button("World Clocks") { model.store.add(.worldClocks()) }
+                Button("Clock Faces") { model.store.add(.clockFaces()) }
             }
         }
 
@@ -53,10 +54,27 @@ public struct StatusBoardCommands: Commands {
                     model.layoutTarget = nil
                 }
                 Divider()
-                ForEach(SBDeviceClass.allCases) { device in
-                    Button(device.displayName) {
-                        model.layoutTarget = device
-                        model.isEditing = true
+                // Same gate as the toolbar's screen menu: the glasses are only a
+                // screen while something is linked to draw them.
+                ForEach(SBDeviceFamily.allCases.filter {
+                    !$0.requiresLink || model.glassesLink.isOffered
+                }) { family in
+                    if family.layouts.count > 1 {
+                        // The screens that turn carry one arrangement per
+                        // orientation, so each is its own choice here.
+                        Menu(family.displayName) {
+                            ForEach(family.layouts) { device in
+                                Button(device.orientation.displayName) {
+                                    model.layoutTarget = device
+                                    model.isEditing = true
+                                }
+                            }
+                        }
+                    } else {
+                        Button(family.displayName) {
+                            model.layoutTarget = family.primaryLayout
+                            model.isEditing = true
+                        }
                     }
                 }
             }

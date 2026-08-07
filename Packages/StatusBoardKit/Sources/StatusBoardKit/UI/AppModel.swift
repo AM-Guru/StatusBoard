@@ -1,6 +1,9 @@
 import Foundation
 import Observation
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 #if canImport(CoreSpotlight) && !os(tvOS)
 import CoreSpotlight
 #endif
@@ -17,6 +20,9 @@ public final class AppModel {
     #if os(macOS)
     public let bridgeServer: BridgeServer
     #endif
+    /// Whether a pair of smart glasses is on the other end of anything. Decides
+    /// if the Smart Glasses screen appears in the menus at all.
+    public let glassesLink = GlassesLink.shared
 
     public var isEditing = false
     /// Which screen's arrangement the window is showing and editing. `nil` — the
@@ -45,12 +51,18 @@ public final class AppModel {
         self.bridgeServer = BridgeServer()
         #endif
 
+        // Mirrored board by board rather than through `allPanels`, so the
+        // widget's edit screen can ask which board a panel comes from.
         snapshots.widgetPanelProvider = { [weak store] in
-            (store?.allPanels ?? []).map {
-                WidgetPanelInfo(key: $0.snapshotKey, title: $0.title, kind: $0.kind,
-                                settings: $0.settings)
+            (store?.dashboards ?? []).flatMap { board in
+                board.panels.map {
+                    WidgetPanelInfo(panelID: $0.id.uuidString, key: $0.snapshotKey,
+                                    title: $0.title, kind: $0.kind, settings: $0.settings,
+                                    boardID: board.id.uuidString, boardName: board.name)
+                }
             }
         }
+        bridgeClient.identity = Self.thisDeviceIdentity()
         bridgeClient.onSnapshot = { [weak snapshots] key, record in
             snapshots?.setAll([key: record])
         }
@@ -86,7 +98,31 @@ public final class AppModel {
         }
     }
 
+    /// How this copy of Status Board introduces itself to a Mac bridge. Stable
+    /// across launches so a device that reconnects is recognised as itself
+    /// rather than counted twice.
+    private static func thisDeviceIdentity() -> BridgeClientIdentity {
+        let key = "sb.bridge.clientID"
+        let defaults = UserDefaults.standard
+        let id = defaults.string(forKey: key) ?? {
+            let fresh = UUID().uuidString
+            defaults.set(fresh, forKey: key)
+            return fresh
+        }()
+        #if os(iOS)
+        let name = UIDevice.current.name
+        #elseif os(macOS)
+        let name = Host.current().localizedName ?? "Mac"
+        #else
+        let name = SBDeviceClass.current.displayName
+        #endif
+        return BridgeClientIdentity(id: id, name: name,
+                                    deviceClass: SBDeviceClass.current.rawValue,
+                                    app: "Status Board")
+    }
+
     public func start() {
+        installK12Reauthenticator()
         sync.start()
         // Apple TV and the Watch have no way to ask for boards themselves —
         // there's no "pull to refresh" on a wall display — so they poll.
@@ -113,6 +149,22 @@ public final class AppModel {
                 IntentDataBridge.applyFocusDashboard(to: self)
             }
         }
+    }
+
+    /// Teaches the K12 session how to sign itself back in on this device.
+    ///
+    /// The portal's session lapses on its own schedule — a night is enough —
+    /// and until this existed, every lapse ended at a sheet somebody had to
+    /// open. Where WebKit exists, the cached portal sign-in is spent offscreen
+    /// to mint a fresh session. On Apple TV there is no WebKit, so a lapsed
+    /// session is handed to the Mac bridge instead: the panel's fetch asks the
+    /// Mac for the finished schedule, and nothing here needs to recover at all.
+    private func installK12Reauthenticator() {
+        #if canImport(WebKit) && !os(tvOS) && !os(watchOS)
+        K12Session.shared.reauthenticator = { portal in
+            await K12SilentSignIn.shared.refresh(portal: portal)
+        }
+        #endif
     }
 
     /// Re-runs the fetch engine whenever any dashboard content changes

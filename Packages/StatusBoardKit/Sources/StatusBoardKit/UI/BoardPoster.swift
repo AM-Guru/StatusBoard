@@ -67,14 +67,21 @@ struct BoardPosterView: View {
         let cellWidth = (size.width - spacing) / CGFloat(board.grid.columns)
         let cellHeight = (size.height - spacing) / CGFloat(board.grid.rows)
         ZStack(alignment: .topLeading) {
-            SBTheme.background
+            // The board's own backdrop, not a flat fill: a poster of a themed
+            // board has to look like the board it was taken from.
+            SBBoardBackdropView(appearance: board.appearance, size: size)
             ForEach(board.panels) { panel in
                 let frame = panel.frame
-                PanelView(panel: panel, record: records[panel.snapshotKey])
+                let origin = CGPoint(x: CGFloat(frame.x) * cellWidth + spacing,
+                                     y: CGFloat(frame.y) * cellHeight + spacing)
+                PanelView(panel: panel, record: records[panel.snapshotKey],
+                          boardAppearance: board.appearance)
+                    .environment(\.sbBoardBackdrop,
+                                 SBBoardBackdrop(appearance: board.appearance,
+                                                 boardSize: size, panelOrigin: origin))
                     .frame(width: CGFloat(frame.width) * cellWidth - spacing,
                            height: CGFloat(frame.height) * cellHeight - spacing)
-                    .offset(x: CGFloat(frame.x) * cellWidth + spacing,
-                            y: CGFloat(frame.y) * cellHeight + spacing)
+                    .offset(x: origin.x, y: origin.y)
             }
         }
         .frame(width: size.width, height: size.height)

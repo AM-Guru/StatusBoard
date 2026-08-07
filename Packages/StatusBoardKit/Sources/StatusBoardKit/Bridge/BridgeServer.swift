@@ -23,6 +23,20 @@ public final class BridgeServer {
     /// Snapshots pushed through the bridge, keyed with the "bridge/" prefix.
     public private(set) var records: [String: SnapshotRecord] = [:]
 
+    /// Subscribers that introduced themselves, newest first. Clients that
+    /// predate `BridgeMessage.identity` simply aren't in here; they still
+    /// subscribe and still count towards `subscriberCount`.
+    public private(set) var linkedClients: [BridgeClientIdentity] = []
+
+    /// The linked pair of smart glasses, if one is connected right now.
+    ///
+    /// This is the whole reason clients introduce themselves: a Mac cannot infer
+    /// from a TCP connection that there are glasses on the other end, and
+    /// offering to arrange a screen nobody owns would be noise in every menu.
+    public var linkedGlasses: BridgeClientIdentity? {
+        linkedClients.first { $0.device == .glasses }
+    }
+
     /// Feeds the local Mac app's snapshot store.
     @ObservationIgnored public var onSnapshot: ((String, SnapshotRecord) -> Void)?
     /// Supplies this Mac's boards to subscribing displays. Set by AppModel;
@@ -129,25 +143,77 @@ public final class BridgeServer {
 
     func connectionDidClose(_ connection: BridgeServerConnection) {
         connections[ObjectIdentifier(connection)] = nil
+        if let identity = identities.removeValue(forKey: ObjectIdentifier(connection)) {
+            rebuildLinkedClients()
+            append(log: "\(identity.name) disconnected")
+        }
         if subscribers.removeValue(forKey: ObjectIdentifier(connection)) != nil {
             subscriberCount = subscribers.count
             append(log: "Device disconnected (\(subscribers.count) connected)")
         }
     }
 
+    /// Who each open subscription says it is, so a disconnect can retract the
+    /// right one when several devices are subscribed at once.
+    @ObservationIgnored private var identities: [ObjectIdentifier: BridgeClientIdentity] = [:]
+
+    private func rebuildLinkedClients() {
+        // Newest first, and deduplicated by the client's own stable ID: a phone
+        // that drops off Wi-Fi and comes back is the same pair of glasses, not a
+        // second one.
+        var seen = Set<String>()
+        linkedClients = identities.values
+            .sorted { $0.name < $1.name }
+            .filter { seen.insert($0.id).inserted }
+        GlassesLink.shared.report(connected: linkedGlasses)
+    }
+
     func handleSubscriberMessage(_ message: BridgeMessage, from connection: BridgeServerConnection) {
-        guard case .webClipRequest(let id, let spec) = message else { return }
-        append(log: "Rendering web clip for device: \(spec.url)")
-        Task { @MainActor in
-            do {
-                let png = try await WebClipRenderer.shared.render(spec: spec)
-                connection.send(.webClipResponse(id: id,
-                                                 pngBase64: png.base64EncodedString(),
-                                                 error: nil))
-            } catch {
-                connection.send(.webClipResponse(id: id, pngBase64: nil,
-                                                 error: error.localizedDescription))
+        switch message {
+        case .identity(let identity):
+            identities[ObjectIdentifier(connection)] = identity
+            rebuildLinkedClients()
+            let screen = identity.device.map { " arranging the \($0.displayName) screen" } ?? ""
+            append(log: "\(identity.name) linked\(screen)")
+
+
+        case .webClipRequest(let id, let spec):
+            append(log: "Rendering web clip for device: \(spec.url)")
+            Task { @MainActor in
+                do {
+                    let png = try await WebClipRenderer.shared.render(spec: spec)
+                    connection.send(.webClipResponse(id: id,
+                                                     pngBase64: png.base64EncodedString(),
+                                                     error: nil))
+                } catch {
+                    connection.send(.webClipResponse(id: id, pngBase64: nil,
+                                                     error: error.localizedDescription))
+                }
             }
+
+        case .k12Request(let id, let portal, let mode):
+            // The display can't sign in to the portal, so this Mac fetches with
+            // its own session — renewing it silently first if it has lapsed —
+            // and sends back the finished schedule. No cookie ever crosses the
+            // network.
+            append(log: "Fetching K12 \(mode.isEmpty ? "schedule" : mode) for device")
+            Task { @MainActor in
+                var config = ConnectorConfig()
+                config.projectURL = portal
+                config.mode = mode
+                var settings = PanelSettings()
+                settings.connector = config
+                let snapshot = await K12OLSSource.fetch(settings: settings)
+                if case .error(let message) = snapshot {
+                    connection.send(.k12Response(id: id, record: nil, error: message))
+                } else {
+                    connection.send(.k12Response(id: id, record: SnapshotRecord(snapshot: snapshot),
+                                                 error: nil))
+                }
+            }
+
+        default:
+            break
         }
     }
 

@@ -259,6 +259,48 @@ extension Dashboard {
         return board
     }
 
+    /// Every clock face at once, so the whole set can be seen side by side
+    /// before one is chosen for a real board.
+    public static func clockFaces() -> Dashboard {
+        var board = Dashboard(name: "Clock Faces")
+        board.grid = BoardGrid(columns: 8, rows: 6)
+        board.appearance.theme = .nocturne
+
+        func clock(_ title: String, _ style: ClockStyle, _ frame: GridRect,
+                   configure: ((inout PanelSettings) -> Void)? = nil) -> Panel {
+            var settings = PanelSettings()
+            settings.clockStyle = style
+            settings.showsSeconds = true
+            // The sun faces need somewhere to be. San Francisco is what the
+            // starter board's weather panel uses, so the sample is consistent
+            // — and every face says plainly how to change it.
+            settings.latitude = 37.7749
+            settings.longitude = -122.4194
+            settings.locationName = "San Francisco"
+            // A sun panel reads its times in its own zone, so a face showing
+            // San Francisco's sunrise has to be on San Francisco's clock —
+            // otherwise it reports a 10 PM sunset to anyone further east.
+            if style.usesLocation { settings.timeZoneID = "America/Los_Angeles" }
+            configure?(&settings)
+            return Panel(kind: .clock, title: title, frame: frame, settings: settings)
+        }
+
+        board.panels = [
+            clock("LCD", .lcd, GridRect(x: 0, y: 0, width: 3, height: 1)),
+            clock("Flip Board", .flip, GridRect(x: 3, y: 0, width: 5, height: 2)) {
+                $0.showsSeconds = false
+            },
+            clock("Modular", .modular, GridRect(x: 0, y: 1, width: 3, height: 2)) {
+                $0.accentColorHex = "#76B6FF"
+            },
+            clock("Analog", .analog, GridRect(x: 3, y: 2, width: 2, height: 2)),
+            clock("24-Hour Dial", .dial, GridRect(x: 5, y: 2, width: 3, height: 2)),
+            clock("Sun Arc", .sunArc, GridRect(x: 0, y: 3, width: 3, height: 3)),
+            clock("Sunrise & Sunset", .sunTimes, GridRect(x: 3, y: 4, width: 5, height: 2)),
+        ]
+        return board
+    }
+
     /// The board seeded on first launch, echoing the classic Status Board layout.
     public static func starter() -> Dashboard {
         var board = Dashboard(name: "My Status Board")

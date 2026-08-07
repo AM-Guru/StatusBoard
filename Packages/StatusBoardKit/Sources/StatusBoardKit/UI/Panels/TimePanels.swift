@@ -1,53 +1,48 @@
 import SwiftUI
 
-/// The classic Status Board clock: big LCD digits, live seconds.
+/// A clock panel: one ticking timeline, dispatched to whichever face the
+/// panel has chosen. Faces live in `ClockFaces.swift`.
 struct ClockPanelContent: View {
-    @Environment(\.sbStyle) private var sbStyle
     let settings: PanelSettings
 
-    @Environment(\.panelAccent) private var accent
+    var timeZone: TimeZone { settings.clockTimeZone }
 
-    var timeZone: TimeZone {
-        settings.timeZoneID.flatMap(TimeZone.init(identifier:)) ?? .current
+    /// How often the face has to be redrawn. Only faces that draw seconds need
+    /// a second-by-second timeline; the sun faces move slowly enough that a
+    /// minute is plenty, and a panel that redraws less costs less on a TV
+    /// that has been showing the same board for a week.
+    private var tick: TimeInterval {
+        switch settings.clockStyle {
+        case .sunTimes: return 60
+        case .sunArc: return settings.showsSeconds ? 1 : 30
+        default: return settings.showsSeconds ? 1 : 30
+        }
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: settings.showsSeconds ? 1 : 30)) { context in
-            GeometryReader { proxy in
-                VStack(spacing: 2) {
-                    Text(timeString(context.date))
-                        .font(SBTheme.lcdFont(size: min(proxy.size.height * 0.52, proxy.size.width * 0.16)))
-                        .foregroundStyle(accent)
-                        .minimumScaleFactor(0.3)
-                        .lineLimit(1)
-                        .contentTransition(.numericText())
-                    Text(dateString(context.date))
-                        .font(SBTheme.titleFont(size: min(proxy.size.height * 0.14, 15)))
-                        .foregroundStyle(sbStyle.textSecondary)
-                        .kerning(1.2)
-                }
-                .frame(width: proxy.size.width, height: proxy.size.height)
-            }
+        TimelineView(.periodic(from: .now, by: tick)) { context in
+            face(at: context.date)
         }
-        .padding(6)
     }
 
-    func timeString(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeZone = timeZone
-        formatter.dateFormat = settings.showsSeconds ? "HH:mm:ss" : "HH:mm"
-        return formatter.string(from: date)
-    }
-
-    func dateString(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "EEE d MMM"
-        var text = formatter.string(from: date).uppercased()
-        if let zoneID = settings.timeZoneID, zoneID != TimeZone.current.identifier {
-            text += "  ·  " + (timeZone.abbreviation() ?? zoneID)
+    @ViewBuilder
+    private func face(at date: Date) -> some View {
+        switch settings.clockStyle {
+        case .lcd:
+            LCDClockFace(settings: settings, date: date)
+        case .flip:
+            FlipClockFace(settings: settings, date: date)
+        case .analog:
+            AnalogClockFace(settings: settings, date: date)
+        case .dial:
+            SolarDialClockFace(settings: settings, date: date)
+        case .modular:
+            ModularClockFace(settings: settings, date: date)
+        case .sunArc:
+            SunArcClockFace(settings: settings, date: date)
+        case .sunTimes:
+            SunTimesClockFace(settings: settings, date: date)
         }
-        return text
     }
 }
 
