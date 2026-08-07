@@ -131,7 +131,10 @@ def load(repo_root=REPO_ROOT):
     """Every profile this project signs Release builds with, keyed by profile name."""
     # Not `--quiet`: that silences the dump itself, not just the chatter.
     dump = subprocess.run(["xcodegen", "dump", "--type", "json"],
-                          cwd=repo_root, capture_output=True, text=True, check=True)
+                          cwd=repo_root, capture_output=True, text=True)
+    if dump.returncode != 0:
+        raise SystemExit("xcodegen could not read project.yml, so what this commit\n"
+                         "signs with is unknown:\n" + (dump.stderr or dump.stdout))
     spec = json.loads(dump.stdout)
 
     requirements = {}

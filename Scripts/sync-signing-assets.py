@@ -53,10 +53,12 @@ def enabled_capabilities(bundle_id):
 
 
 def enable_capability(bundle_id, capability):
+    # No `settings` key at all rather than an empty list: a capability that wants
+    # settings rejects the empty list outright, and one that does not never reads it.
     status, body = asc_api.call("POST", "/v1/bundleIdCapabilities", {
         "data": {
             "type": "bundleIdCapabilities",
-            "attributes": {"capabilityType": capability, "settings": []},
+            "attributes": {"capabilityType": capability},
             "relationships": {"bundleId": asc_api.rel("bundleIds", bundle_id)},
         }})
     if status >= 300:

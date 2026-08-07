@@ -68,6 +68,12 @@ def main():
             problems.append(
                 f"{name}: does not carry {', '.join(shortfalls[0])} "
                 f"(needed by {', '.join(requirement.targets)})")
+        elif len(contents) > 1:
+            # One usable profile is enough to sign, but Xcode picks between
+            # same-named profiles on its own, so say so rather than let a build
+            # depend on which one it happens to choose.
+            print(f"  ! {len(contents)} ACTIVE profiles are named {name!r}; "
+                  "delete the stale one in App Store Connect")
 
     if problems:
         print("\nfetch-profiles: these profiles cannot sign this commit:", file=sys.stderr)
