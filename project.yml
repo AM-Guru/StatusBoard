@@ -148,6 +148,12 @@ targets:
         NSLocationWhenInUseUsageDescription: Status Board uses your location only to show the weather where you are, on weather panels you set to Current Location. It stays on this device.
         NSBonjourServices:
           - _statusboard._tcp
+        # Lets the Smart Glasses screen appear when SybilSight is installed
+        # beside this app on the same iPhone. Without the declaration iOS
+        # answers "no" to canOpenURL, which degrades to the remembered link
+        # rather than breaking anything.
+        LSApplicationQueriesSchemes:
+          - sybilsight
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
 
