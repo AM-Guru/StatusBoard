@@ -65,14 +65,51 @@ public struct Dashboard: Identifiable, Codable, Hashable, Sendable {
             ?? GridRect(x: 0, y: 0, width: width, height: height)
     }
 
-    /// Reserves a slot for a new panel, growing the board downward when the
-    /// grid is already full — otherwise new panels would silently stack on
-    /// top of existing ones.
-    public mutating func makeRoom(width: Int, height: Int) -> GridRect {
-        if let free = freeFrame(width: width, height: height) { return free }
-        let y = grid.rows
-        grid.rows += height
-        return GridRect(x: 0, y: y, width: min(width, grid.columns), height: height)
+    /// Reserves a slot for a new panel: a free gap when the board still has
+    /// one, otherwise a spot laid *over* what is already there.
+    ///
+    /// A full board used to grow another row, which quietly reshaped every
+    /// panel already on it — one added panel and a board tuned over weeks was
+    /// re-proportioned. The grid is left exactly as it was instead, and the
+    /// new panel arrives on top of its neighbours for the owner to drag
+    /// wherever the space should come from.
+    public func makeRoom(width: Int, height: Int) -> GridRect {
+        let width = max(1, min(width, grid.columns))
+        let height = max(1, min(height, grid.rows))
+        return freeFrame(width: width, height: height)
+            ?? leastCrowdedFrame(width: width, height: height)
+    }
+
+    /// The position on a full board that covers the fewest panel cells.
+    ///
+    /// Overlap is counted once per panel it lands on, so a cell two panels
+    /// already share costs twice what a cell one panel holds does. That keeps
+    /// panels added back to back from piling up in the same corner: each one
+    /// makes the spot it took the most expensive place for the next.
+    ///
+    /// Burying a panel completely costs double, which is what makes a new
+    /// panel on an evenly tiled board land straddling its neighbours instead
+    /// of squarely on one of them. Landing squarely reads as nothing having
+    /// happened — worst of all for a duplicate, which is an exact copy of the
+    /// panel it would be hiding.
+    func leastCrowdedFrame(width: Int, height: Int) -> GridRect {
+        var best = GridRect(x: 0, y: 0, width: width, height: height)
+        var bestCost = Int.max
+        for y in 0...max(0, grid.rows - height) {
+            for x in 0...max(0, grid.columns - width) {
+                let candidate = GridRect(x: x, y: y, width: width, height: height)
+                let cost = panels.reduce(0) { total, panel in
+                    let area = panel.frame.width * panel.frame.height
+                    let covered = panel.frame.overlapArea(with: candidate)
+                    return total + covered + (covered == area ? area : 0)
+                }
+                if cost < bestCost {
+                    bestCost = cost
+                    best = candidate
+                }
+            }
+        }
+        return best
     }
 
     /// A standalone copy of this board under a new name.
@@ -137,6 +174,14 @@ public struct GridRect: Codable, Hashable, Sendable {
     public func intersects(_ other: GridRect) -> Bool {
         x < other.x + other.width && other.x < x + width &&
         y < other.y + other.height && other.y < y + height
+    }
+
+    /// How many grid cells this rectangle and another share.
+    public func overlapArea(with other: GridRect) -> Int {
+        let columns = min(x + width, other.x + other.width) - max(x, other.x)
+        let rows = min(y + height, other.y + other.height) - max(y, other.y)
+        guard columns > 0, rows > 0 else { return 0 }
+        return columns * rows
     }
 
     public func clamped(to grid: BoardGrid) -> GridRect {

@@ -48,11 +48,25 @@ public struct StatusBoardCommands: Commands {
             }
             .keyboardShortcut("r", modifiers: .command)
 
-            Button("Preview on Another Device…") {
-                model.showsDeviceSimulator = true
+            Menu("Arrange For") {
+                Button("This \(SBDeviceClass.current.displayName)") {
+                    model.layoutTarget = nil
+                }
+                Divider()
+                ForEach(SBDeviceClass.allCases) { device in
+                    Button(device.displayName) {
+                        model.layoutTarget = device
+                        model.isEditing = true
+                    }
+                }
+            }
+            .disabled(model.store.selectedDashboard == nil)
+
+            Button("Layout Options") {
+                model.showsLayoutInspector.toggle()
             }
             .keyboardShortcut("d", modifiers: [.command, .shift])
-            .disabled(model.store.selectedDashboard == nil)
+            .disabled(model.layoutTarget == nil)
 
             Divider()
 
@@ -92,6 +106,7 @@ public struct StatusBoardCommands: Commands {
                         guard let boardID = model.store.selectedDashboard?.id,
                               let panel = model.store.addPanel(kind: kind, to: boardID) else { return }
                         model.isEditing = true
+                        model.selectedPanelID = panel.id
                         model.inspectedPanelID = panel.id
                     }
                 }

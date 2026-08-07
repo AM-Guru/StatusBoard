@@ -113,6 +113,7 @@ public struct BoardView: View {
                         Button {
                             if let panel = model.store.addPanel(kind: kind, to: dashboardID) {
                                 model.isEditing = true
+                                model.selectedPanelID = panel.id
                                 model.inspectedPanelID = panel.id
                             }
                         } label: {
@@ -204,7 +205,12 @@ public struct BoardView: View {
             }
             .offset(x: origin.x + (isDragging ? dragOffset.width : 0),
                     y: origin.y + (isDragging ? dragOffset.height : 0))
-            .zIndex(isDragging || isResizing ? 10 : 0)
+            // Panels are allowed to overlap — a new one lands on top of its
+            // neighbours rather than squeezing the board into another row — so
+            // the selected panel is lifted above the stack. Without that, a
+            // panel someone has just covered can't be clicked to drag back out.
+            .zIndex(isDragging || isResizing ? 10
+                    : (model.selectedPanelID == panel.id ? 5 : 0))
             .animation(.snappy(duration: 0.2), value: panel.frame)
             // Deliberately not focusable on tvOS: panels are read-only there, and
             // a focusable panel would swallow the remote's swipe-down before
@@ -228,7 +234,9 @@ public struct BoardView: View {
         }
         Divider()
         Button {
-            model.store.duplicatePanel(id: panel.id, in: dashboardID)
+            if let copy = model.store.duplicatePanel(id: panel.id, in: dashboardID) {
+                model.selectedPanelID = copy.id
+            }
         } label: {
             Label("Duplicate", systemImage: "plus.square.on.square")
         }

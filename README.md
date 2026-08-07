@@ -76,14 +76,17 @@ the developer has no way to see your data.
   device class (Mac, iPad, iPhone, Apple TV, Watch) can carry its own panel
   positions, grid size, and hidden panels. Devices you never customize keep
   following the board's shared layout, so nothing changes until you ask for it.
-- **Device Preview** on Mac, iPad and iPhone (toolbar button, or ⇧⌘D) — see a
-  board exactly as another screen shows it and arrange it from there. The board
-  is laid out at the target screen's real point size and then scaled to fit, so
-  panel text shrinks in proportion and you can tell what will be legible from
-  the couch. Drag and resize panels, toggle individual panels off per device,
-  set that screen's grid, Auto-Arrange, or copy another device's arrangement.
-  The Apple TV preview also draws a **TV-safe guide**: anything outside the
-  dashed line is at risk of being cropped by the television's overscan.
+- **Screen menu** on Mac, iPad and iPhone (toolbar dropdown beside Edit) — pick
+  This Mac, iPad, iPhone, Apple TV or Apple Watch and the whole window becomes
+  that screen's layout editor: no modal, the board gets the full window. The
+  board is laid out at the target screen's real point size and then scaled to
+  fit, so panel text shrinks in proportion and you can tell what will be legible
+  from the couch. Drag and resize panels, toggle individual panels off per
+  device, set that screen's grid, Auto-Arrange, or copy another device's
+  arrangement — the options column hides with ⇧⌘D when you want the whole window
+  for the board. The Apple TV layout also draws a **TV-safe guide**: anything
+  outside the dashed line is at risk of being cropped by the television's
+  overscan.
 - Classic touches: triple-tap a panel to force-reload it; share a board as JSON
   from the toolbar.
 - **Per-panel accent colors** — pick any color in a panel's Appearance section;

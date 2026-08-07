@@ -74,20 +74,34 @@ import Testing
         }
     }
 
-    /// A full board must grow rather than stacking the new panel on top of an
-    /// existing one — the starter board ships completely full.
-    @Test func fullBoardGrowsInsteadOfOverlapping() {
-        var board = Dashboard.starter()
+    /// A full board must take the new panel on top of what it already holds —
+    /// the starter board ships completely full, and growing it a row instead
+    /// would re-proportion every panel on it. It stays inside the grid so the
+    /// panel is on screen to be dragged.
+    @Test func fullBoardOverlapsInsteadOfGrowing() {
+        let board = Dashboard.starter()
         #expect(board.freeFrame(width: 2, height: 1) == nil)
-        let originalRows = board.grid.rows
+        let grid = board.grid
 
         let frame = board.makeRoom(width: 2, height: 1)
-        #expect(board.grid.rows == originalRows + 1)
-        #expect(frame.y == originalRows)
-        #expect(!board.panels.contains { $0.frame.intersects(frame) })
+        #expect(board.grid == grid)
+        #expect(frame.x >= 0 && frame.x + frame.width <= grid.columns)
+        #expect(frame.y >= 0 && frame.y + frame.height <= grid.rows)
+        #expect(board.panels.contains { $0.frame.intersects(frame) })
     }
 
-    @Test func makeRoomUsesGapsBeforeGrowing() {
+    /// Panels added one after another to a full board spread out instead of
+    /// piling onto the same cells, because each one makes the spot it took the
+    /// most crowded place on the board.
+    @Test func repeatedAddsToAFullBoardDoNotStackInOnePlace() {
+        var board = Dashboard.starter()
+        let first = board.makeRoom(width: 2, height: 1)
+        board.panels.append(Panel(kind: .text, title: "first", frame: first))
+        let second = board.makeRoom(width: 2, height: 1)
+        #expect(second != first)
+    }
+
+    @Test func makeRoomUsesGapsBeforeOverlapping() {
         var board = Dashboard(name: "t")
         board.panels.append(Panel(kind: .text, title: "a",
                                   frame: GridRect(x: 0, y: 0, width: 2, height: 1)))
@@ -95,6 +109,14 @@ import Testing
         let frame = board.makeRoom(width: 2, height: 1)
         #expect(board.grid.rows == rows)
         #expect(frame == GridRect(x: 2, y: 0, width: 2, height: 1))
+    }
+
+    /// A panel bigger than the board it is dropped onto is trimmed to fit
+    /// rather than hanging off the edge where it can't be dragged.
+    @Test func makeRoomClampsToTheGrid() {
+        let board = Dashboard(name: "t", grid: BoardGrid(columns: 4, rows: 2))
+        let frame = board.makeRoom(width: 9, height: 5)
+        #expect(frame == GridRect(x: 0, y: 0, width: 4, height: 2))
     }
 
     @Test func firstFreeFrameAvoidsOverlap() {

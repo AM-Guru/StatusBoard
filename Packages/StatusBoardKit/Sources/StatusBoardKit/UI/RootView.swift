@@ -47,10 +47,9 @@ struct SplitRootView: View {
     @State private var renamingBoard: Dashboard?
     @State private var showsBoardAppearance = false
     @State private var renameText = ""
-    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView {
             sidebar
         } detail: {
             detail
@@ -68,10 +67,6 @@ struct SplitRootView: View {
             if let board = model.store.selectedDashboard {
                 BoardAppearanceView(model: model, dashboardID: board.id)
             }
-        }
-        .sheet(isPresented: $model.showsDeviceSimulator) {
-            DeviceSimulatorView(model: model,
-                                dashboardID: model.store.selectedDashboard?.id ?? UUID())
         }
         .alert("Rename Dashboard", isPresented: Binding(
             get: { renamingBoard != nil },
@@ -152,13 +147,25 @@ struct SplitRootView: View {
     @ViewBuilder
     var detail: some View {
         if let board = model.store.selectedDashboard {
-            BoardView(model: model, dashboardID: board.id)
-                .navigationTitle(board.name)
-                #if os(iOS)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(SBTheme.background, for: .navigationBar)
-                #endif
-                .toolbar { boardToolbar(board: board) }
+            Group {
+                // Arranging another screen takes over the detail area rather
+                // than opening a sheet, so the board gets the whole window.
+                if let target = model.layoutTarget {
+                    DeviceLayoutEditorView(model: model, dashboardID: board.id,
+                                           device: target)
+                } else {
+                    BoardView(model: model, dashboardID: board.id)
+                }
+            }
+            .navigationTitle(board.name)
+            #if os(macOS)
+            .navigationSubtitle(model.layoutTarget.map { "Arranging for \($0.displayName)" } ?? "")
+            #endif
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(SBTheme.background, for: .navigationBar)
+            #endif
+            .toolbar { boardToolbar(board: board) }
         } else {
             ContentUnavailableView("No Dashboard",
                                    systemImage: "rectangle.grid.2x2",
@@ -166,23 +173,22 @@ struct SplitRootView: View {
         }
     }
 
+    // Deliberately no sidebar button here: NavigationSplitView puts one in the
+    // sidebar's own toolbar on macOS, and adding a second left two identical
+    // controls side by side in the title bar.
     @ToolbarContentBuilder
     func boardToolbar(board: Dashboard) -> some ToolbarContent {
-        #if os(macOS)
-        ToolbarItem(placement: .navigation) {
-            Button {
-                columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
-            } label: {
-                Label("Toggle Sidebar", systemImage: "sidebar.left")
-            }
-        }
-        #endif
         ToolbarItem(placement: .primaryAction) {
             Menu {
                 ForEach(PanelKind.allCases) { kind in
                     Button {
                         if let panel = model.store.addPanel(kind: kind, to: board.id) {
                             model.isEditing = true
+                            // Selected as well as inspected: a board with no
+                            // room left takes the new panel on top of its
+                            // neighbours, and selection is what marks it out
+                            // and keeps it above them while it's dragged home.
+                            model.selectedPanelID = panel.id
                             model.inspectedPanelID = panel.id
                         }
                     } label: {
@@ -202,19 +208,26 @@ struct SplitRootView: View {
             .help("Theme, wallpaper and spacing for this board")
         }
         ToolbarItem(placement: .primaryAction) {
-            Button {
-                model.showsDeviceSimulator = true
-            } label: {
-                Label("Device Preview", systemImage: "rectangle.on.rectangle.angled")
-            }
-            .help("See this board on Apple TV, iPad, iPhone, Mac or Watch")
-        }
-        ToolbarItem(placement: .primaryAction) {
             Toggle(isOn: $model.isEditing) {
                 Label("Edit", systemImage: "slider.horizontal.3")
             }
             .toggleStyle(.button)
             .keyboardShortcut("e", modifiers: .command)
+        }
+        // Which screen the window is arranging, sitting beside Edit because it
+        // decides where every edit lands.
+        ToolbarItem(placement: .primaryAction) {
+            ScreenTargetMenu(model: model)
+        }
+        if model.layoutTarget != nil {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    model.showsLayoutInspector.toggle()
+                } label: {
+                    Label("Layout Options", systemImage: "sidebar.right")
+                }
+                .help("Show or hide grid, panel and overscan options")
+            }
         }
         if model.isEditing {
             ToolbarItem(placement: .automatic) {
@@ -255,6 +268,44 @@ struct SplitRootView: View {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(board) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+/// Chooses which screen the window shows and edits: this device's own live
+/// board, or another screen's arrangement of the same board.
+struct ScreenTargetMenu: View {
+    @Bindable var model: AppModel
+
+    private var current: SBDeviceClass { .current }
+
+    var body: some View {
+        Menu {
+            Button {
+                model.layoutTarget = nil
+            } label: {
+                Label("This \(current.displayName)",
+                      systemImage: model.layoutTarget == nil ? "checkmark" : current.symbolName)
+            }
+            Section("Arrange For") {
+                ForEach(SBDeviceClass.allCases) { device in
+                    Button {
+                        // Picking a screen is asking to arrange it, so drop
+                        // straight into edit mode.
+                        model.layoutTarget = device
+                        model.isEditing = true
+                    } label: {
+                        Label(device.displayName,
+                              systemImage: model.layoutTarget == device
+                                  ? "checkmark" : device.symbolName)
+                    }
+                }
+            }
+        } label: {
+            Label(model.layoutTarget?.displayName ?? "This \(current.displayName)",
+                  systemImage: (model.layoutTarget ?? current).symbolName)
+        }
+        .labelStyle(.titleAndIcon)
+        .help("Choose the screen this window arranges: Apple TV, iPad, iPhone, Mac or Watch")
     }
 }
 
@@ -583,7 +634,7 @@ struct TVMenuView: View {
     }
 
     private var footer: some View {
-        Text("Boards and their panel data sync from your iPhone, iPad and Mac over iCloud, and live values arrive from the Mac bridge. Arrange this board for the TV from Device Preview on your Mac, iPad or iPhone.")
+        Text("Boards and their panel data sync from your iPhone, iPad and Mac over iCloud, and live values arrive from the Mac bridge. Arrange this board for the TV by choosing Apple TV from the screen menu on your Mac, iPad or iPhone.")
             .font(.system(size: 24, design: .rounded))
             .foregroundStyle(SBTheme.textSecondary)
             .fixedSize(horizontal: false, vertical: true)

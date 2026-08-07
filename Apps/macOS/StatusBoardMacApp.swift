@@ -11,6 +11,9 @@ struct StatusBoardMacApp: App {
                 .frame(minWidth: 900, minHeight: 540)
                 .task { model.start() }
         }
+        // Arranging a 1920×1080 board wants room, and this window is now where
+        // that happens rather than in a sheet.
+        .defaultSize(width: 1400, height: 900)
         .commands { StatusBoardCommands(model: model) }
 
         // Appears in the Window menu; hosts the bridge server controls.

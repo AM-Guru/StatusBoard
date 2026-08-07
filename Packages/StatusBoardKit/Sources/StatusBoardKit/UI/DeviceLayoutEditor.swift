@@ -2,89 +2,68 @@
 import SwiftUI
 
 /// Shows a board as another screen will show it — Apple TV, iPad, iPhone, Mac,
-/// Watch — and lets that screen's arrangement be edited from here.
+/// Watch — and lets that screen's arrangement be edited in place.
+///
+/// This fills the window's detail area rather than a sheet. Arranging a 1920×1080
+/// TV board through a modal the size of a settings panel meant dragging panels
+/// around a postage stamp; here the screen gets everything the window has, and
+/// the options that used to crowd it sit in a column that can be closed.
 ///
 /// The board is laid out at the target screen's real point size and then scaled
-/// down to fit, so panel text shrinks in proportion: what looks cramped in the
-/// simulator will look cramped on the TV.
-public struct DeviceSimulatorView: View {
-    let model: AppModel
+/// down to fit, so panel text shrinks in proportion: what looks cramped here
+/// will look cramped on the TV.
+public struct DeviceLayoutEditorView: View {
+    @Bindable var model: AppModel
     let dashboardID: Dashboard.ID
+    /// The screen being arranged. Chosen from the toolbar's screen menu.
+    let device: SBDeviceClass
 
-    @AppStorage("sb.simulator.device") private var deviceRaw = SBDeviceClass.tv.rawValue
     @AppStorage("sb.simulator.tvSafeGuide") private var showsOverscanGuide = true
-    @Environment(\.dismiss) private var dismiss
 
-    private var isEditingLayout: Bool {
-        get { model.simulatorEditsLayout }
-        nonmutating set { model.simulatorEditsLayout = newValue }
-    }
-
-    public init(model: AppModel, dashboardID: Dashboard.ID) {
+    public init(model: AppModel, dashboardID: Dashboard.ID, device: SBDeviceClass) {
         self.model = model
         self.dashboardID = dashboardID
-    }
-
-    private var device: SBDeviceClass {
-        get { SBDeviceClass(rawValue: deviceRaw) ?? .tv }
-        nonmutating set { deviceRaw = newValue.rawValue }
+        self.device = device
     }
 
     private var board: Dashboard? { model.store.dashboard(id: dashboardID) }
 
     public var body: some View {
-        NavigationStack {
-            GeometryReader { proxy in
-                // Side by side once there's room for a preview and a column of
-                // controls; stacked and scrolling on a phone.
-                if proxy.size.width >= 820 {
-                    HStack(spacing: 0) {
-                        stage
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .padding(20)
-                        Divider()
-                        ScrollView {
-                            controls.padding(20)
-                        }
-                        .frame(width: 340)
-                    }
-                } else {
+        GeometryReader { proxy in
+            // Side by side once there's room for a screen and a column of
+            // options; stacked and scrolling on a phone. Either way, closing the
+            // options gives the screen the whole window.
+            if !model.showsLayoutInspector {
+                stage.padding(16)
+            } else if proxy.size.width >= 820 {
+                HStack(spacing: 0) {
+                    stage
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(20)
+                    Divider()
                     ScrollView {
-                        VStack(spacing: 20) {
-                            stage
-                                .frame(height: max(300, proxy.size.height * 0.42))
-                            controls
-                        }
-                        .padding(16)
+                        options.padding(20)
                     }
+                    .frame(width: 320)
                 }
-            }
-            .background(SBTheme.background.opacity(0.6))
-            .navigationTitle("Device Preview")
-            #if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-            #endif
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        isEditingLayout = false
-                        dismiss()
+            } else {
+                ScrollView {
+                    VStack(spacing: 20) {
+                        stage
+                            .frame(height: max(300, proxy.size.height * 0.45))
+                        options
                     }
+                    .padding(16)
                 }
             }
         }
-        #if os(macOS)
-        .frame(minWidth: 980, idealWidth: 1180, minHeight: 640, idealHeight: 760)
-        #else
-        .presentationSizing(.page)
-        #endif
+        .background(SBTheme.background.opacity(0.6))
     }
 
     // MARK: - Stage
 
     private var stage: some View {
         VStack(spacing: 12) {
-            devicePicker
             GeometryReader { proxy in
                 let size = device.nominalPointSize
                 let scale = min(proxy.size.width / size.width,
@@ -92,28 +71,26 @@ public struct DeviceSimulatorView: View {
                 screen(size: size, scale: scale)
                     .frame(width: proxy.size.width, height: proxy.size.height)
             }
-            Text(device.previewNote)
+            Text(caption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private var devicePicker: some View {
-        Picker("Device", selection: Binding(get: { device },
-                                            set: { device = $0 })) {
-            ForEach(SBDeviceClass.allCases) { option in
-                Label(option.displayName, systemImage: option.symbolName)
-                    .tag(option)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+    private var caption: String {
+        let note = "\(device.displayName) · \(device.previewNote)"
+        return model.isEditing
+            ? "\(note) — drag panels to arrange this screen"
+            : "\(note) — turn on Edit to arrange this screen"
     }
 
     private func screen(size: CGSize, scale: CGFloat) -> some View {
-        BoardView(model: model, dashboardID: dashboardID,
-                  layoutTarget: device, isPreview: true,
-                  editingOverride: isEditingLayout)
+        // Not a preview: these are the board's real panels, so configuring and
+        // refreshing them from here works exactly as it does on the live board.
+        // Only the layout being written is different.
+        BoardView(model: model, dashboardID: dashboardID, layoutTarget: device)
             .frame(width: size.width, height: size.height)
             .overlay {
                 if showsOverscanGuide, device.overscanInset != .zero {
@@ -135,10 +112,10 @@ public struct DeviceSimulatorView: View {
             .shadow(color: .black.opacity(0.4), radius: 18, y: 8)
     }
 
-    // MARK: - Controls
+    // MARK: - Options
 
     @ViewBuilder
-    private var controls: some View {
+    private var options: some View {
         VStack(alignment: .leading, spacing: 22) {
             layoutSection
             if device.overscanInset != .zero {
@@ -157,19 +134,17 @@ public struct DeviceSimulatorView: View {
             sectionTitle("Layout")
             Text(isCustom
                  ? "\(device.displayName) has its own arrangement. Changes here don't touch your other devices."
-                 : "\(device.displayName) follows the board's shared layout, the same one every device without its own arrangement uses.")
+                 : "\(device.displayName) follows the board's shared layout, the same one every device without its own arrangement uses. Moving a panel here gives it an arrangement of its own.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Toggle("Edit \(device.displayName) Layout", isOn: Binding(
-                get: { isEditingLayout },
-                set: { editing in
-                    // Touching the layout here must never rewrite the shared
-                    // one, so give this device its own copy first.
-                    if editing { model.store.beginCustomLayout(in: dashboardID, on: device) }
-                    isEditingLayout = editing
-                }))
+            // The same edit mode the toolbar toggles; repeated here because it
+            // is what the rest of this column is for. Turning it on writes
+            // nothing: every edit made while a screen is targeted goes to that
+            // screen's own layout, which is created the moment it is needed, so
+            // looking at a screen never leaves an override behind.
+            Toggle("Edit Layout", isOn: $model.isEditing)
                 .toggleStyle(.switch)
 
             HStack(spacing: 10) {
@@ -191,7 +166,6 @@ public struct DeviceSimulatorView: View {
 
             if isCustom {
                 Button("Reset to Shared Layout", role: .destructive) {
-                    isEditingLayout = false
                     model.store.resetLayout(in: dashboardID, on: device)
                 }
             }
