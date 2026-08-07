@@ -19,6 +19,23 @@ import asc_api
 PROCESSING_TIMEOUT = 30 * 60      # Apple usually takes 5-15 minutes
 POLL_SECONDS = 30
 
+# A build that has only just finished processing can 404 on one App Store
+# Connect node while another has already listed it. tvOS was left out of the
+# group exactly that way: found in the listing, VALID when polled, then "no
+# resource of type 'builds' with id …" on the very next call.
+TRANSIENT = (404, 429, 500, 502, 503, 504)
+RETRIES = 4
+RETRY_PAUSE = 15
+
+
+def call(method: str, path: str, body=None):
+    """asc_api.call, but patient with App Store Connect's eventual consistency."""
+    for attempt in range(RETRIES):
+        status, payload = asc_api.call(method, path, body)
+        if status < 300 or status not in TRANSIENT or attempt == RETRIES - 1:
+            return status, payload
+        time.sleep(RETRY_PAUSE)
+
 
 def release_notes() -> str:
     """The commit message, which is what a tester most wants to read."""
@@ -33,13 +50,21 @@ def release_notes() -> str:
 
 
 def builds_with_number(number: str):
-    """Every platform's build carrying this build number."""
+    """Every platform's build carrying this build number.
+
+    Listing failures are swallowed: the caller polls, so a bad answer costs one
+    round rather than the whole submission.
+    """
     found = []
-    for version in asc_api.get(
-            f"/v1/apps/{asc_api.APP_ID}/preReleaseVersions?limit=50")["data"]:
+    status, payload = call("GET", f"/v1/apps/{asc_api.APP_ID}/preReleaseVersions?limit=200")
+    if status >= 300:
+        return found
+    for version in payload["data"]:
         platform = version["attributes"]["platform"]
-        for build in asc_api.get(
-                f"/v1/preReleaseVersions/{version['id']}/builds?limit=200")["data"]:
+        status, builds = call("GET", f"/v1/preReleaseVersions/{version['id']}/builds?limit=200")
+        if status >= 300:
+            continue
+        for build in builds["data"]:
             if build["attributes"].get("version") == number:
                 found.append((platform, build["id"]))
     return found
@@ -49,27 +74,34 @@ def wait_until_processed(build_id: str) -> str:
     deadline = time.time() + PROCESSING_TIMEOUT
     state = "UNKNOWN"
     while time.time() < deadline:
-        state = asc_api.get(f"/v1/builds/{build_id}")["data"]["attributes"].get(
-            "processingState", "UNKNOWN")
-        if state in ("VALID", "FAILED", "INVALID"):
-            return state
+        status, payload = call("GET", f"/v1/builds/{build_id}")
+        if status < 300:
+            state = payload["data"]["attributes"].get("processingState", "UNKNOWN")
+            if state in ("VALID", "FAILED", "INVALID"):
+                return state
         time.sleep(POLL_SECONDS)
     return state
 
 
-def set_release_notes(build_id: str, notes: str) -> None:
-    existing = asc_api.get(f"/v1/builds/{build_id}/betaBuildLocalizations")["data"]
-    if existing:
-        for localization in existing:
-            asc_api.call("PATCH", f"/v1/betaBuildLocalizations/{localization['id']}",
-                         {"data": {"type": "betaBuildLocalizations",
-                                   "id": localization["id"],
-                                   "attributes": {"whatsNew": notes}}})
-    else:
-        asc_api.call("POST", "/v1/betaBuildLocalizations", {"data": {
+def set_release_notes(build_id: str, notes: str):
+    """Returns (status, body); anything >= 300 is a real failure to report."""
+    status, payload = call("GET", f"/v1/builds/{build_id}/betaBuildLocalizations")
+    if status >= 300:
+        return status, payload
+    existing = payload["data"]
+    if not existing:
+        return call("POST", "/v1/betaBuildLocalizations", {"data": {
             "type": "betaBuildLocalizations",
             "attributes": {"locale": "en-US", "whatsNew": notes},
             "relationships": {"build": asc_api.rel("builds", build_id)}}})
+    for localization in existing:
+        status, payload = call("PATCH", f"/v1/betaBuildLocalizations/{localization['id']}",
+                               {"data": {"type": "betaBuildLocalizations",
+                                         "id": localization["id"],
+                                         "attributes": {"whatsNew": notes}}})
+        if status >= 300:
+            return status, payload
+    return 200, {}
 
 
 def group_id(name: str):
@@ -132,10 +164,14 @@ def main() -> int:
             print(f"  ! {platform}: still {state} — skipped, submit it by hand if needed")
             continue
 
-        set_release_notes(build_id, notes)
+        status, body = set_release_notes(build_id, notes)
+        if status >= 300:
+            print(f"  ✗ {platform}: could not set release notes: {body}")
+            failures += 1
+            continue
 
-        status, body = asc_api.call("POST", f"/v1/betaGroups/{gid}/relationships/builds",
-                                    {"data": [{"type": "builds", "id": build_id}]})
+        status, body = call("POST", f"/v1/betaGroups/{gid}/relationships/builds",
+                            {"data": [{"type": "builds", "id": build_id}]})
         if status >= 300 and "already" not in str(body).lower():
             print(f"  ✗ {platform}: could not add to {args.group!r}: {body}")
             failures += 1
@@ -144,7 +180,7 @@ def main() -> int:
         note = ""
         if not is_internal:
             # External testing needs Beta App Review for each new version.
-            review, review_body = asc_api.call("POST", "/v1/betaAppReviewSubmissions", {
+            review, review_body = call("POST", "/v1/betaAppReviewSubmissions", {
                 "data": {"type": "betaAppReviewSubmissions",
                          "relationships": {"build": asc_api.rel("builds", build_id)}}})
             if review < 300:
