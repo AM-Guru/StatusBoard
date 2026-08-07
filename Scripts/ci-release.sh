@@ -163,6 +163,17 @@ if [[ -z "${BUILD_NUMBER:-}" ]]; then
 fi
 echo "  ✓ build number ${BUILD_NUMBER}"
 
+# A profile is a snapshot of its App ID taken the day it was issued, so an
+# entitlement added in a commit is only half a change — the capability has to be
+# enabled on the identifier and the profile reissued, or the archive stops with
+# "doesn't include the com.apple.developer.… entitlement". Reconciling that here,
+# on every release, is what keeps a new entitlement from being a release you have
+# to notice and repair by hand. Idempotent: a commit that adds none prints ✓.
+if ! python3 Scripts/sync-signing-assets.py; then
+  echo "Could not bring App Store Connect in line with project.yml." >&2
+  exit 1
+fi
+
 # Every Release configuration signs manually, so all the App Store profiles
 # have to be on disk before xcodebuild runs. Fetched from App Store Connect
 # rather than carried as secrets, so a renewed profile needs no rotation here.

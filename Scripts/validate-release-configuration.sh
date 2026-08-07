@@ -42,6 +42,20 @@ else
   fail "neither xcodegen nor brew is on PATH (a launchd service does not inherit /opt/homebrew/bin — set it in the runner's .env)"
 fi
 
+echo "▸ Signing requirements"
+
+# Which App ID capability each entitlement in project.yml needs. Offline, so it
+# runs here rather than at build time, and it fails on an entitlement the project
+# has never classified — the case that would otherwise sail past every check and
+# die in xcodebuild fifteen minutes into an archive.
+if command -v xcodegen >/dev/null; then
+  if ! python3 "$(dirname "${BASH_SOURCE[0]}")/signing_spec.py"; then
+    fail "project.yml declares an entitlement Scripts/signing_spec.py does not know"
+  fi
+else
+  echo "  · xcodegen not installed yet — signing requirements checked at build time"
+fi
+
 echo "▸ Configuration"
 
 for name in APPLE_TEAM_ID APP_STORE_DISTRIBUTION; do

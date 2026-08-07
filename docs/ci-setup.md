@@ -117,8 +117,42 @@ it was pinned.
 
 `Scripts/fetch-profiles.py` downloads every `Status Board *` profile from App
 Store Connect at build time with the API key already on the runner, so profiles
-are not secrets and a renewal needs no rotation. It signs its own ES256 JWT with
-`openssl` because the build machine has no third-party Python.
+are not secrets and a renewal needs no rotation.
+
+## Adding an entitlement is a portal change too
+
+A provisioning profile is a **snapshot of its App ID taken the day it was
+issued**. It carries the capabilities that were enabled at that moment and never
+learns about later ones, so an entitlement added in a commit does not reach the
+build by being committed. Enable the capability on the identifier and reissue the
+profile, or the archive stops with
+
+```
+error: Provisioning profile "Status Board iOS App Store" doesn't include
+       the com.apple.developer.homekit entitlement.
+```
+
+That is not hypothetical: the HomeKit commit failed exactly this way, on all
+three profiles that use `guru.am.StatusBoard`, after the unit tests had passed.
+
+Three pieces keep it from happening again, and none of them needs anyone to
+remember anything:
+
+| Where | What it does |
+| --- | --- |
+| `Scripts/signing_spec.py` | Reads project.yml through `xcodegen dump` and says which App ID capability each entitlement needs. An entitlement it has never seen is a **hard error**, not an assumption — guessing "probably harmless" is how HomeKit got through. |
+| `Scripts/sync-signing-assets.py` | Enables the missing capabilities, reissues every profile that is stale or short an entitlement, then re-reads the portal to confirm. Idempotent; `--check` reports without changing anything. |
+| `Scripts/fetch-profiles.py` | After installing, checks each profile really carries what this commit signs with — seconds, instead of finding out a quarter of an hour into an archive. |
+
+`Scripts/validate-release-configuration.sh` runs the first of those offline,
+before any credential is staged, so an unclassified entitlement fails in the
+cheapest step of the job. `ci-release.sh` runs the other two on every release.
+
+**So: adding an entitlement to project.yml is now the whole change.** The next
+release enables the capability, reissues the profiles and carries on. What still
+needs a human is a capability Apple will not turn on blind — iCloud wants its
+containers, App Groups its group — and the error says so, names the identifier,
+and links the page.
 
 ## macOS needs one more certificate
 
@@ -298,12 +332,12 @@ cover the watch — a watch-only app would need its own record.
 ## Signing gotchas found on the first real run
 
 **Bundle ID capabilities must be enabled in the portal before archiving.**
-Automatic signing will not invent them. `guru.am.StatusBoard` needs
-`APP_GROUPS`, `ICLOUD` and `HEALTHKIT`; `guru.am.StatusBoard.widgets` needs
-`APP_GROUPS`. Without them the build fails with a wall of *"Provisioning
-profile 'iOS Team Provisioning Profile: \*' doesn't include the … capability"*.
-They are already set; if a new identifier is added, `POST /v1/bundleIdCapabilities`
-with the App Store Connect API is the quickest way to turn them on.
+Signing will not invent them, and without them the build fails with a wall of
+*"… doesn't include the … capability"*. This was a manual step for a year and was
+duly forgotten the first time it mattered; `Scripts/sync-signing-assets.py` now
+does it on every release — see *Adding an entitlement is a portal change too*.
+The identifiers and what they carry are derived from project.yml, so this
+paragraph no longer needs a list to go out of date.
 
 **Pass the API key by id, not by path.** `-authenticationKeyPath` makes
 xcodebuild fail with *"Authentication failed: Make sure a bearer token was
