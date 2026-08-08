@@ -11,7 +11,7 @@
 <p class="back"><a href="./">← Status Board</a></p>
 
 <h1>Privacy Policy</h1>
-<p class="meta">Status Board (iOS, iPadOS, macOS, tvOS, watchOS) · Last updated 6 August 2026</p>
+<p class="meta">Status Board (iOS, iPadOS, macOS, tvOS, watchOS) · Last updated 8 August 2026</p>
 
 <p class="lede">Status Board collects nothing. There are no accounts, no sign-up, no
 analytics, no tracking, no advertising, and no third-party SDKs. The developer
@@ -28,14 +28,16 @@ mechanism by which we could receive it.</p>
       values, board images, and the widget cache are stored in the app's own
       container on the device.</li>
   <li><strong>In your private iCloud database.</strong> If you enable iCloud
-      sync, dashboard <em>layouts and settings</em> are synchronised between your
+      sync, dashboard layouts and settings are synchronised between your
       own devices using CloudKit's <strong>private database</strong>. That
       database belongs to your Apple Account. Apple does not grant the developer
-      access to it, and the developer has none. Fetched values — including Health
-      data — are never written to iCloud.</li>
-  <li><strong>In the system Keychain.</strong> Credentials, API tokens, and
-      session cookies for services you connect are stored in the Keychain on your
-      device and are never copied anywhere else.</li>
+      access to it, and the developer has none. Calendar and non-camera HomeKit
+      panels sync their latest rendered value by default so unsupported screens
+      can display it. A Health panel does so only if you explicitly opt in.</li>
+  <li><strong>In the system Keychain.</strong> Web clip passwords, Nest sign-ins,
+      and K12 credentials are device-only Keychain items. Some connector addresses
+      and tokens entered directly in a panel are also part of that panel's settings
+      and therefore follow the board through private iCloud when sync is enabled.</li>
 </ul>
 
 <h2>Services you connect</h2>
@@ -90,12 +92,18 @@ through anything the developer runs.</p>
 directly from the address you entered and caches it locally. The built-in
 wallpapers are drawn by the app itself and fetch nothing.</p>
 
-<h2>Health data</h2>
+<h2>Calendar and Health data</h2>
+<p>Calendar panels read upcoming events with your permission. Their latest
+rendered event feed — including displayed titles and start times — syncs through
+your private iCloud database by default so Apple TV can show it. You can turn
+this off for each panel.</p>
 <p>Health panels read a small set of values (steps, active energy, exercise
 minutes, heart rate) from HealthKit, with your permission, in order to display
-them. The app requests <strong>read-only</strong> access, never writes to
-HealthKit, never syncs Health data to iCloud, and never transmits it off the
-device. You can revoke access at any time in the Health app.</p>
+them. The app requests <strong>read-only</strong> access and never writes to
+HealthKit. Health stays on the reading device by default. If you explicitly
+enable cross-device value sync for a Health panel, only that panel's latest
+rendered value or aggregate is copied to your private iCloud database; raw
+samples and history are not. You can revoke access at any time in the Health app.</p>
 
 <h2>Your home</h2>
 <p>Home panels can read from three places. Which one a panel uses is your
@@ -104,15 +112,17 @@ choice, and none of them involves the developer.</p>
 accessories already paired to your Apple ID — room temperatures, humidity,
 motion, doors, locks and thermostats — in order to display them. Access is
 <strong>read-only</strong>: Status Board never turns anything on, unlocks
-anything, or changes a setpoint. HomeKit data travels between your own devices
-and your own accessories, and is never transmitted off them. A HomeKit camera
-panel shows the camera's live stream through Apple's own view; the app has no
-access to the frames and nothing is recorded or stored. You can revoke HomeKit
-access at any time in Settings ▸ Privacy &amp; Security.</p>
+anything, or changes a setpoint. The latest rendered sensor or thermostat value
+syncs through your private iCloud database by default so a Mac without HomeKit
+access can display it; you can turn this off per panel. A HomeKit camera panel
+shows the camera's live stream through Apple's own view; the app has no access
+to the frames and nothing is recorded or stored. You can revoke HomeKit access
+at any time in Settings ▸ Privacy &amp; Security.</p>
 <p><strong>Home Assistant.</strong> Your device talks to the Home Assistant
 server at the address you enter — normally a machine on your own network, in
 which case the request never leaves it — using a long-lived access token you
-create. The token is kept in the Keychain. A Home Assistant camera panel
+create. The token is cached in the Keychain and is also part of the synced panel
+settings when iCloud board sync is enabled. A Home Assistant camera panel
 fetches a still image from your server the same way.</p>
 <p><strong>Google Nest.</strong> If you connect a Google account, your device
 talks to Google's Smart Device Management API directly, using a Device Access
@@ -143,7 +153,9 @@ the Keychain on your device.</p>
 <p>The macOS app can act as a bridge that relays dashboard values to your other
 devices over your local network, discovered with Bonjour. That traffic stays on
 your network. It does not pass through the internet or through any server we
-operate.</p>
+operate. Board definitions sent by the bridge, and JSON files you explicitly
+share, omit connector tokens, private keys, MCP headers, and recognisable
+credentials in URLs.</p>
 
 <h2>Children</h2>
 <p>Status Board is not directed at children and collects no data from anyone,

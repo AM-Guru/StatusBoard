@@ -19,6 +19,13 @@ public enum DataSnapshot: Codable, Hashable, Sendable {
     case error(String)
 }
 
+extension DataSnapshot {
+    public var isError: Bool {
+        if case .error = self { return true }
+        return false
+    }
+}
+
 /// A snapshot plus the moment it was captured.
 public struct SnapshotRecord: Codable, Hashable, Sendable {
     public var snapshot: DataSnapshot

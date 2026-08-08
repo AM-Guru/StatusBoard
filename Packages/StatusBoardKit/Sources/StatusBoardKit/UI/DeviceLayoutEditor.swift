@@ -23,6 +23,10 @@ public struct DeviceLayoutEditorView: View {
     /// colour, light on black. Off shows the same arrangement in full colour,
     /// which is easier to pick panels apart in while dragging them around.
     @AppStorage("sb.simulator.glassesMonochrome") private var showsMonochrome = true
+    /// Relative to "fit in the stage". This is an editing aid only; it never
+    /// changes the board or the target device's layout.
+    @State private var previewZoom: CGFloat = 1
+    @GestureState private var pinchScale: CGFloat = 1
 
     public init(model: AppModel, dashboardID: Dashboard.ID, device: SBDeviceClass) {
         self.model = model
@@ -76,10 +80,29 @@ public struct DeviceLayoutEditorView: View {
             orientationPicker
             GeometryReader { proxy in
                 let size = device.nominalPointSize
-                let scale = min(proxy.size.width / size.width,
-                                proxy.size.height / size.height)
-                screen(size: size, scale: scale)
-                    .frame(width: proxy.size.width, height: proxy.size.height)
+                let fit = min(proxy.size.width / size.width,
+                              proxy.size.height / size.height)
+                let zoom = min(3, max(0.5, previewZoom * pinchScale))
+                let scale = fit * zoom
+                ScrollView([.horizontal, .vertical]) {
+                    ZStack {
+                        Color.clear
+                        screen(size: size, scale: scale)
+                    }
+                    .frame(width: max(proxy.size.width, size.width * scale),
+                           height: max(proxy.size.height, size.height * scale))
+                }
+                .scrollIndicators(.automatic)
+                .gesture(
+                    MagnifyGesture()
+                        .updating($pinchScale) { value, state, _ in
+                            state = value.magnification
+                        }
+                        .onEnded { value in
+                            previewZoom = min(3, max(0.5,
+                                previewZoom * value.magnification))
+                        }
+                )
             }
             Text(caption)
                 .font(.caption)
@@ -169,6 +192,7 @@ public struct DeviceLayoutEditorView: View {
                 lensSection
             }
             layoutSection
+            zoomSection
             if let guide = device.screenGuide, guide.inset != .zero {
                 screenGuideSection(guide)
             }
@@ -176,6 +200,41 @@ public struct DeviceLayoutEditorView: View {
             panelSection
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var zoomSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("Preview Zoom")
+            HStack(spacing: 10) {
+                Button {
+                    previewZoom = max(0.5, previewZoom - 0.1)
+                } label: {
+                    Image(systemName: "minus.magnifyingglass")
+                }
+                .accessibilityLabel("Zoom out")
+                Slider(value: $previewZoom, in: 0.5...3, step: 0.1) {
+                    Text("Preview zoom")
+                }
+                Button {
+                    previewZoom = min(3, previewZoom + 0.1)
+                } label: {
+                    Image(systemName: "plus.magnifyingglass")
+                }
+                .accessibilityLabel("Zoom in")
+            }
+            HStack {
+                Text("\(Int((previewZoom * 100).rounded()))% of fit")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Fit") { previewZoom = 1 }
+                    .disabled(previewZoom == 1)
+            }
+            Text("Pinch or use the slider to inspect and edit a target screen more closely. Zoom affects only this preview; scroll to reach the rest of the screen.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     /// Everything specific to a screen that isn't this app's to draw: whether

@@ -46,7 +46,7 @@ public final class AppModel {
         self.snapshots = snapshots
         self.engine = DataSourceEngine(snapshots: snapshots)
         self.bridgeClient = BridgeClient()
-        self.sync = CloudSyncEngine(store: store)
+        self.sync = CloudSyncEngine(store: store, snapshots: snapshots)
         #if os(macOS)
         self.bridgeServer = BridgeServer()
         #endif
@@ -58,7 +58,8 @@ public final class AppModel {
                 board.panels.map {
                     WidgetPanelInfo(panelID: $0.id.uuidString, key: $0.snapshotKey,
                                     title: $0.title, kind: $0.kind, settings: $0.settings,
-                                    boardID: board.id.uuidString, boardName: board.name)
+                                    boardID: board.id.uuidString, boardName: board.name,
+                                    boardAppearance: board.appearance)
                 }
             }
         }
@@ -83,9 +84,17 @@ public final class AppModel {
         }
         #if os(macOS)
         bridgeServer.onSnapshot = { [weak snapshots] key, record in
-            snapshots?.setAll([key: record])
+            // `BridgeServer` already sent this push to subscribers. Store it
+            // without asking the SnapshotStore observer to relay it again.
+            snapshots?.setAll([key: record], notifyObserver: false)
         }
-        bridgeServer.boardProvider = { [weak store] in store?.dashboards ?? [] }
+        bridgeServer.boardProvider = { [weak store] in
+            (store?.dashboards ?? []).map { $0.redactedForExternalTransfer() }
+        }
+        bridgeServer.snapshotProvider = { [weak snapshots] in snapshots?.records ?? [:] }
+        snapshots.recordObserver = { [weak bridgeServer] key, record in
+            bridgeServer?.relaySnapshot(key: key, record: record)
+        }
         #endif
         engine.bridgeClient = bridgeClient
 

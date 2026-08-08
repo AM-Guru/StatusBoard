@@ -7,6 +7,7 @@ public struct PanelView: View {
     /// The board this panel is sitting on. Panels rendered off a board — in a
     /// widget, on the watch, in a list — get the default look.
     let boardAppearance: BoardAppearance
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     public init(panel: Panel, record: SnapshotRecord?,
                 boardAppearance: BoardAppearance = BoardAppearance()) {
@@ -81,8 +82,12 @@ public struct PanelView: View {
                                 dynamic: dynamic, accent: style.accent)
         }
         .clipShape(shape)
-        .overlay(shape.strokeBorder(appearance.resolvedBorderColor(theme: theme),
-                                    lineWidth: appearance.resolvedBorderWidth()))
+        .overlay(shape.strokeBorder(
+            appearance.resolvedBorderColor(theme: theme,
+                                           increasedContrast: colorSchemeContrast == .increased),
+            lineWidth: colorSchemeContrast == .increased
+                ? max(2, appearance.resolvedBorderWidth())
+                : appearance.resolvedBorderWidth()))
         .shadow(color: appearance.glowRadius > 0 ? style.accent.opacity(0.55) : .clear,
                 radius: appearance.glowRadius)
         // A panel speaks as one element: charts and LCD digits are decorative

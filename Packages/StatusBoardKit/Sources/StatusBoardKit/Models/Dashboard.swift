@@ -131,6 +131,11 @@ public struct Dashboard: Identifiable, Codable, Hashable, Sendable {
             let fresh = UUID()
             newIDs[copy.panels[index].id.uuidString] = fresh.uuidString
             copy.panels[index].id = fresh
+            // Duplicating a whole board creates an independent board. Sharing a
+            // panel is an explicit action; a board copy must not silently turn
+            // later edits into cross-board edits.
+            copy.panels[index].linkedContentID = nil
+            copy.panels[index].linkedContentModifiedAt = nil
         }
         copy.deviceLayouts = copy.deviceLayouts.mapValues { layout in
             var remapped = layout
@@ -143,6 +148,66 @@ public struct Dashboard: Identifiable, Codable, Hashable, Sendable {
             return remapped
         }
         return copy
+    }
+
+    /// A board safe to hand to another person or send over the unencrypted
+    /// local-network bridge. Private CloudKit sync intentionally keeps the
+    /// original so a user's own devices can connect independently; external
+    /// transfers omit credentials and values whose purpose cannot be inferred.
+    public func redactedForExternalTransfer() -> Dashboard {
+        var copy = self
+        copy.appearance.backgroundImageURL = Self.redactedURL(copy.appearance.backgroundImageURL)
+        for index in copy.panels.indices {
+            var settings = copy.panels[index].settings
+            settings.url = Self.redactedURL(settings.url)
+            settings.weatherPersonalURL = Self.redactedURL(settings.weatherPersonalURL)
+            settings.feedSources = settings.feedSources.map { source in
+                var source = source
+                source.url = Self.redactedURL(source.url) ?? ""
+                return source
+            }
+            settings.statusTargets = settings.statusTargets.map { target in
+                var target = target
+                target.url = Self.redactedURL(target.url) ?? ""
+                return target
+            }
+            settings.appearance.backgroundImageURL = Self.redactedURL(
+                settings.appearance.backgroundImageURL)
+            if var connector = settings.connector {
+                connector.token = nil
+                connector.privateKeyPEM = nil
+                connector.projectURL = Self.redactedURL(connector.projectURL)
+                settings.connector = connector
+            }
+            if var mcp = settings.mcp {
+                mcp.server.headers = [:]
+                mcp.server.arguments = []
+                mcp.server.url = Self.redactedURL(mcp.server.url)
+                mcp.argumentsJSON = nil
+                settings.mcp = mcp
+            }
+            copy.panels[index].settings = settings
+        }
+        return copy
+    }
+
+    /// Removes URL user-info and query values commonly used as credentials,
+    /// while retaining ordinary configuration such as paths and coordinates.
+    private static func redactedURL(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty, var components = URLComponents(string: raw) else {
+            return raw
+        }
+        components.user = nil
+        components.password = nil
+        if let items = components.queryItems {
+            let sensitive = ["token", "key", "secret", "password", "passwd",
+                             "auth", "signature", "credential"]
+            components.queryItems = items.filter { item in
+                let name = item.name.lowercased()
+                return !sensitive.contains(where: name.contains)
+            }
+        }
+        return components.string ?? raw
     }
 }
 

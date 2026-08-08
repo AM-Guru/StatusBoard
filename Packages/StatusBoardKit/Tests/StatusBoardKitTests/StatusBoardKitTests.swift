@@ -266,7 +266,9 @@ import Testing
     }
 
     @Test func keepsAtMostTheMergedLimit() {
-        let many = (0..<80).map { item("i\($0)", minutesAgo: $0) }
+        let many = (0..<80).map { (index: Int) in
+            item("i\(index)", minutesAgo: index)
+        }
         #expect(FeedParser.merge([(index: 0, feed: many)]).count == FeedParser.mergedLimit)
     }
 
@@ -721,6 +723,164 @@ import Testing
         #expect(store.dashboards.count == before)
         #expect(store.dashboard(id: copy.id) == nil)
     }
+
+    @Test func externalTransferRedactsSecretsWithoutMutatingTheBoard() throws {
+        var connector = ConnectorConfig()
+        connector.token = "secret-token"
+        connector.privateKeyPEM = "PRIVATE KEY"
+        connector.projectURL = "https://user:pass@example.com/api?token=nope&room=kitchen"
+        var settings = PanelSettings()
+        settings.url = "https://example.com/data?api_key=nope&view=summary"
+        settings.connector = connector
+        settings.mcp = MCPPanelConfig(
+            server: MCPServerConfig(transport: .http, arguments: ["--token", "nope"],
+                                    url: "https://mcp.example.com?auth=nope",
+                                    headers: ["Authorization": "Bearer nope"]),
+            tool: "status", argumentsJSON: "{\"password\":\"nope\"}")
+        let panel = Panel(kind: .github, title: "Private",
+                          frame: GridRect(x: 0, y: 0, width: 1, height: 1),
+                          settings: settings)
+        let board = Dashboard(name: "Export", panels: [panel])
+
+        let shared = board.redactedForExternalTransfer()
+        let exported = try #require(shared.panels.first?.settings)
+        #expect(exported.connector?.token == nil)
+        #expect(exported.connector?.privateKeyPEM == nil)
+        #expect(exported.connector?.projectURL == "https://example.com/api?room=kitchen")
+        #expect(exported.url == "https://example.com/data?view=summary")
+        #expect(exported.mcp?.server.headers.isEmpty == true)
+        #expect(exported.mcp?.server.arguments.isEmpty == true)
+        #expect(exported.mcp?.argumentsJSON == nil)
+        #expect(board.panels[0].settings.connector?.token == "secret-token")
+    }
+}
+
+@MainActor
+@Suite struct SharedPanelTests {
+    private func makeStore() -> DashboardStore {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sb-shared-panel-\(UUID().uuidString).json")
+        return DashboardStore(fileURL: url)
+    }
+
+    @Test func sharingCreatesAPlacementWithOneContentIdentity() throws {
+        let store = makeStore()
+        let source = store.dashboards[0]
+        store.add(Dashboard(name: "Wall"))
+        let target = store.dashboards[1]
+        let original = source.panels[0]
+
+        let placement = try #require(store.sharePanel(id: original.id, from: source.id,
+                                                       to: target.id))
+        let updatedOriginal = try #require(store.dashboard(id: source.id)?.panels.first)
+        #expect(placement.id != updatedOriginal.id)
+        #expect(placement.linkedContentID == updatedOriginal.linkedContentID)
+        #expect(placement.snapshotKey == updatedOriginal.snapshotKey)
+        #expect(placement.frame != updatedOriginal.frame || target.panels.isEmpty)
+    }
+
+    @Test func contentEditsReplicateButFramesDoNot() throws {
+        let store = makeStore()
+        let source = store.dashboards[0]
+        store.add(Dashboard(name: "Wall"))
+        let targetID = store.dashboards[1].id
+        let original = source.panels[0]
+        let placement = try #require(store.sharePanel(id: original.id, from: source.id,
+                                                       to: targetID))
+        let targetFrame = placement.frame
+
+        var edited = try #require(store.dashboard(id: source.id)?.panels.first)
+        edited.title = "Shared Clock"
+        edited.settings.timeZoneID = "Pacific/Honolulu"
+        edited.frame = GridRect(x: 6, y: 3, width: 2, height: 1)
+        store.updatePanel(edited, in: source.id)
+
+        let follower = try #require(store.dashboard(id: targetID)?.panels.first {
+            $0.id == placement.id
+        })
+        #expect(follower.title == "Shared Clock")
+        #expect(follower.settings.timeZoneID == "Pacific/Honolulu")
+        #expect(follower.frame == targetFrame)
+    }
+
+    @Test func explicitThemeStaysFixedAndBoardThemeCanDiffer() throws {
+        let store = makeStore()
+        let source = store.dashboards[0]
+        store.add(Dashboard(name: "Wall"))
+        let targetID = store.dashboards[1].id
+        let original = source.panels[0]
+        _ = try #require(store.sharePanel(id: original.id, from: source.id, to: targetID))
+
+        var edited = try #require(store.dashboard(id: source.id)?.panels.first)
+        edited.settings.appearance.theme = .paper
+        store.updatePanel(edited, in: source.id)
+        #expect(store.dashboard(id: targetID)?.panels.first?.settings.appearance.theme == .paper)
+
+        edited = try #require(store.dashboard(id: source.id)?.panels.first)
+        edited.settings.appearance.theme = .board
+        store.updatePanel(edited, in: source.id)
+        var wall = try #require(store.dashboard(id: targetID))
+        wall.appearance.theme = .aurora
+        store.update(wall)
+        let follower = try #require(store.dashboard(id: targetID)?.panels.first)
+        #expect(SBPanelStyle.themeName(panel: follower, board: wall.appearance) == .aurora)
+    }
+
+    @Test func unlinkStopsLaterReplication() throws {
+        let store = makeStore()
+        let source = store.dashboards[0]
+        store.add(Dashboard(name: "Wall"))
+        let targetID = store.dashboards[1].id
+        let original = source.panels[0]
+        let placement = try #require(store.sharePanel(id: original.id, from: source.id,
+                                                       to: targetID))
+        store.unlinkPanel(id: placement.id, in: targetID)
+
+        var edited = try #require(store.dashboard(id: source.id)?.panels.first)
+        edited.title = "Changed"
+        store.updatePanel(edited, in: source.id)
+        #expect(store.dashboard(id: targetID)?.panels.first?.title != "Changed")
+        #expect(store.dashboard(id: targetID)?.panels.first?.linkedContentID == nil)
+    }
+
+    @Test func portableSnapshotDefaultsArePrivacyAware() {
+        let frame = GridRect(x: 0, y: 0, width: 1, height: 1)
+        #expect(Panel(kind: .calendar, title: "Calendar", frame: frame)
+            .sharesLatestSnapshotViaICloud)
+        #expect(Panel(kind: .homeKit, title: "Home", frame: frame)
+            .sharesLatestSnapshotViaICloud)
+        var camera = Panel(kind: .homeKit, title: "Camera", frame: frame)
+        camera.settings.homeMode = .camera
+        camera.settings.syncSnapshotToICloud = true
+        #expect(!camera.sharesLatestSnapshotViaICloud)
+        #expect(!Panel(kind: .health, title: "Health", frame: frame)
+            .sharesLatestSnapshotViaICloud)
+        var health = Panel(kind: .health, title: "Health", frame: frame)
+        health.settings.syncSnapshotToICloud = true
+        #expect(health.sharesLatestSnapshotViaICloud)
+    }
+
+    @Test func remoteBoardsConvergeOnTheNewestSharedContentRevision() throws {
+        let store = makeStore()
+        let source = store.dashboards[0]
+        store.add(Dashboard(name: "Wall"))
+        let targetID = store.dashboards[1].id
+        let original = source.panels[0]
+        _ = try #require(store.sharePanel(id: original.id, from: source.id, to: targetID))
+
+        var newest = try #require(store.dashboard(id: source.id)?.panels.first)
+        newest.title = "Current"
+        store.updatePanel(newest, in: source.id)
+
+        var lateStaleRecord = try #require(store.dashboard(id: targetID))
+        lateStaleRecord.panels[0].title = "Stale"
+        lateStaleRecord.panels[0].linkedContentModifiedAt = .distantPast
+        lateStaleRecord.modifiedAt = Date().addingTimeInterval(60)
+        store.applyRemote(lateStaleRecord)
+
+        #expect(store.dashboard(id: targetID)?.panels[0].title == "Current")
+        #expect(store.dashboard(id: source.id)?.panels[0].title == "Current")
+    }
 }
 
 @Suite struct SpotlightIdentifierTests {
@@ -806,7 +966,7 @@ import Testing
         #expect(AdBlockRuleConverter.convert(filterList: list, limit: 10).count == 10)
     }
 
-    @Test func seedListConvertsCleanly() {
+    @Test @MainActor func seedListConvertsCleanly() {
         // The built-in offline list must never produce a pattern WebKit rejects.
         let rules = AdBlockRuleConverter.convert(filterList: AdBlockService.seedFilters)
         #expect(rules.count > 40)
@@ -878,7 +1038,8 @@ import Testing
     @Test func requiresHostAndToken() async {
         var settings = PanelSettings()
         settings.connector = ConnectorConfig()
-        let snapshot = await CanvasSource.fetch(settings: settings)
+        let snapshot = await CanvasSource.fetch(settings: settings,
+                                                inheritSharedCredentials: false)
         guard case .error(let message) = snapshot else {
             Issue.record("expected a configuration error")
             return
@@ -1326,6 +1487,11 @@ struct K12ScheduleSnapshotTests {
 }
 
 @Suite struct BridgeProtocolTests {
+    @Test func subscriptionHandshakeCarriesAnOptionalToken() {
+        #expect(BridgeMessage.subscribeHandshake(token: "") == "SB SUBSCRIBE 1")
+        #expect(BridgeMessage.subscribeHandshake(token: "  secret  ")
+                == "SB SUBSCRIBE 1 secret")
+    }
     @Test func messageRoundtrip() throws {
         let record = SnapshotRecord(snapshot: .number(7, unit: "req/s"))
         let message = BridgeMessage.snapshot(key: "bridge/x", record: record)
@@ -1704,10 +1870,12 @@ struct WatchLayoutTests {
 
     private func canvas(_ device: SBDeviceClass, screenHeight: CGFloat,
                         gridRows: Int, panels: [Panel],
-                        isEditing: Bool = false) -> SBBoardCanvas {
+                        isEditing: Bool = false,
+                        contentScale: CGFloat = 1) -> SBBoardCanvas {
         SBBoardCanvas(screenHeight: screenHeight, spacing: spacing,
                       grid: BoardGrid(columns: 1, rows: gridRows),
-                      panels: panels, device: device, isEditing: isEditing)
+                      panels: panels, device: device, isEditing: isEditing,
+                      contentScale: contentScale)
     }
 
     /// Eight declared rows, two of them used: the board is two rows tall and a
@@ -1765,6 +1933,18 @@ struct WatchLayoutTests {
             #expect(board.scrolls == false)
             #expect(board.height == 720)
         }
+    }
+
+    @Test func contentScalingGrowsScrollableBoardsButNotTelevision() {
+        let mac = canvas(.mac, screenHeight: 600, gridRows: 4,
+                         panels: panels(rows: 4), contentScale: 1.5)
+        #expect(abs(mac.rowHeight - ((600.0 - 10) / 4) * 1.5) < 0.001)
+        #expect(mac.scrolls)
+
+        let tv = canvas(.tv, screenHeight: 600, gridRows: 4,
+                        panels: panels(rows: 4), contentScale: 1.5)
+        #expect(abs(tv.rowHeight - (600.0 - 10) / 4) < 0.001)
+        #expect(!tv.scrolls)
     }
 
     /// The everyday way a board grows empty rows: take the bottom panel off one

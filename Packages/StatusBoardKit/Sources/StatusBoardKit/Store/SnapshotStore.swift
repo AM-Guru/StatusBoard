@@ -22,10 +22,15 @@ public struct WidgetPanelInfo: Codable, Hashable, Sendable, Identifiable {
     /// board first and then which panel from it.
     public var boardID: String
     public var boardName: String
+    /// Needed to resolve `.board` into the theme this placement actually uses.
+    /// A linked panel can therefore follow each dashboard's theme independently,
+    /// while a panel with an explicit theme stays visually fixed everywhere.
+    public var boardAppearance: BoardAppearance
 
     public init(panelID: String, key: String, title: String, kind: PanelKind,
                 settings: PanelSettings = PanelSettings(),
-                boardID: String = "", boardName: String = "") {
+                boardID: String = "", boardName: String = "",
+                boardAppearance: BoardAppearance = BoardAppearance()) {
         self.panelID = panelID
         self.key = key
         self.title = title
@@ -33,6 +38,7 @@ public struct WidgetPanelInfo: Codable, Hashable, Sendable, Identifiable {
         self.settings = settings
         self.boardID = boardID
         self.boardName = boardName
+        self.boardAppearance = boardAppearance
     }
 
     /// Hand-written so a widget still draws from a state file an older build
@@ -50,6 +56,9 @@ public struct WidgetPanelInfo: Codable, Hashable, Sendable, Identifiable {
         panelID = try container.decodeIfPresent(String.self, forKey: .panelID) ?? key
         boardID = try container.decodeIfPresent(String.self, forKey: .boardID) ?? ""
         boardName = try container.decodeIfPresent(String.self, forKey: .boardName) ?? ""
+        boardAppearance = try container.decodeIfPresent(BoardAppearance.self,
+                                                        forKey: .boardAppearance)
+            ?? BoardAppearance()
     }
 }
 
@@ -126,6 +135,15 @@ public final class SnapshotStore {
     @ObservationIgnored private let cacheURL: URL
     @ObservationIgnored private var persistTask: Task<Void, Never>?
     @ObservationIgnored public var widgetPanelProvider: (() -> [WidgetPanelInfo])?
+    /// Announces a newly stored local value. The Mac bridge uses this to relay
+    /// fetched panels (Calendar included), not only values pushed to its HTTP
+    /// endpoint. Callers ingesting a value that the bridge already broadcast
+    /// can suppress it to avoid sending the same packet twice.
+    @ObservationIgnored public var recordObserver: ((String, SnapshotRecord) -> Void)?
+    /// Separate observer for private-iCloud portable values. Keeping this apart
+    /// from the bridge observer lets an incoming CloudKit value be relayed on
+    /// the LAN without immediately uploading itself again.
+    @ObservationIgnored public var syncObserver: ((String, SnapshotRecord) -> Void)?
     /// Called with (key, latestNumericValue) whenever a snapshot carries a
     /// number — the alert engine hangs off this.
     @ObservationIgnored public var numericObserver: ((String, Double) -> Void)?
@@ -142,16 +160,22 @@ public final class SnapshotStore {
     }
 
     public func set(_ snapshot: DataSnapshot, for key: String, at date: Date = Date()) {
-        records[key] = SnapshotRecord(snapshot: snapshot, updatedAt: date)
+        let record = SnapshotRecord(snapshot: snapshot, updatedAt: date)
+        records[key] = record
         notifyNumeric(key: key, snapshot: snapshot)
+        recordObserver?(key, record)
+        syncObserver?(key, record)
         schedulePersist()
     }
 
-    public func setAll(_ incoming: [String: SnapshotRecord]) {
+    public func setAll(_ incoming: [String: SnapshotRecord], notifyObserver: Bool = true,
+                       notifySyncObserver: Bool = true) {
         for (key, record) in incoming {
             if let existing = records[key], existing.updatedAt > record.updatedAt { continue }
             records[key] = record
             notifyNumeric(key: key, snapshot: record.snapshot)
+            if notifyObserver { self.recordObserver?(key, record) }
+            if notifySyncObserver { self.syncObserver?(key, record) }
         }
         schedulePersist()
     }

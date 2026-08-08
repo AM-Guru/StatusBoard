@@ -113,7 +113,10 @@ public enum HealthSource {
     }
     #else
     public static func fetch(settings: PanelSettings) async -> DataSnapshot {
-        .error("Health panels work on iPhone, iPad, and Apple Watch — values sync here via iCloud")
+        if settings.syncSnapshotToICloud == true {
+            return .error("Waiting for this Health panel's opted-in value from private iCloud")
+        }
+        return .error("Health is unavailable here. Enable private-iCloud value sync for this panel on a device that can read Health.")
     }
     #endif
 }

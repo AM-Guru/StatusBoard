@@ -15,7 +15,8 @@ public final class BridgeServer {
     public private(set) var subscriberCount = 0
     public private(set) var log: [String] = []
     public var port: UInt16 = SBIdentifiers.defaultBridgePort
-    /// Optional shared-secret; when set, pushes must carry X-StatusBoard-Token.
+    /// Optional shared-secret; when set, pushes and display subscriptions must
+    /// authenticate before any boards or snapshots are sent.
     public var token: String = ""
     /// Publish this Mac's CPU/memory/disk/network under mac.* keys.
     public var publishesSystemMetrics = true
@@ -43,6 +44,10 @@ public final class BridgeServer {
     /// while it's nil the bridge behaves exactly as it did before and sends
     /// snapshots only.
     @ObservationIgnored public var boardProvider: (() -> [Dashboard])?
+    /// Supplies every value the Mac app knows, including fetched panel values.
+    /// This makes a newly connected TV immediately receive Calendar/Home data
+    /// rather than waiting for the next refresh interval.
+    @ObservationIgnored public var snapshotProvider: (() -> [String: SnapshotRecord])?
 
     @ObservationIgnored private var listener: NWListener?
     /// All open connections (HTTP and subscribers) — retained until closed.
@@ -126,9 +131,21 @@ public final class BridgeServer {
             connection.send(.boards(boards))
             append(log: "Sent \(boards.count) board\(boards.count == 1 ? "" : "s") to device")
         }
-        for (key, record) in records {
+        let initial = snapshotProvider?() ?? records
+        for (key, record) in initial {
             connection.send(.snapshot(key: key, record: record))
         }
+    }
+
+    func acceptsSubscriptionHandshake(_ line: String) -> Bool {
+        let prefix = BridgeMessage.subscribeHandshake
+        guard line == prefix || line.hasPrefix(prefix + " ") else { return false }
+        let supplied = line.count > prefix.count
+            ? String(line.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+            : ""
+        let accepted = token.isEmpty || supplied == token
+        if !accepted { append(log: "Rejected device with an invalid bridge token") }
+        return accepted
     }
 
     /// Pushes the current board set to every subscribed display. Called when a
@@ -138,6 +155,17 @@ public final class BridgeServer {
         guard !subscribers.isEmpty, let boards = boardProvider?() else { return }
         for connection in subscribers.values {
             connection.send(.boards(boards))
+        }
+    }
+
+    /// Relays a value produced by the Mac app itself. Unlike an HTTP bridge
+    /// push, the key is already the panel's canonical snapshot key and the
+    /// local SnapshotStore already contains it, so this must not prefix or
+    /// feed the value back through `onSnapshot`.
+    public func relaySnapshot(key: String, record: SnapshotRecord) {
+        records[key] = record
+        for connection in subscribers.values {
+            connection.send(.snapshot(key: key, record: record))
         }
     }
 
@@ -356,19 +384,18 @@ final class BridgeServerConnection {
 
     private func process() {
         if mode == .undetermined {
-            let handshake = Data(BridgeMessage.subscribeHandshake.utf8)
-            if buffer.count >= handshake.count {
-                mode = buffer.starts(with: handshake) ? .subscriber : .http
-                if mode == .subscriber {
-                    // Drop the handshake line.
-                    if let newline = buffer.firstIndex(of: 0x0A) {
-                        buffer.removeSubrange(buffer.startIndex...newline)
-                    } else {
-                        buffer.removeAll()
-                    }
-                    server?.connectionDidSubscribe(self)
+            guard let newline = buffer.firstIndex(of: 0x0A) else { return }
+            let firstLine = buffer.subdata(in: buffer.startIndex..<newline)
+            let line = String(data: firstLine, encoding: .utf8) ?? ""
+            if line.hasPrefix(BridgeMessage.subscribeHandshake) {
+                buffer.removeSubrange(buffer.startIndex...newline)
+                guard server?.acceptsSubscriptionHandshake(line) == true else {
+                    close()
+                    return
                 }
-            } else if !buffer.isEmpty && !handshake.starts(with: buffer) {
+                mode = .subscriber
+                server?.connectionDidSubscribe(self)
+            } else {
                 mode = .http
             }
         }

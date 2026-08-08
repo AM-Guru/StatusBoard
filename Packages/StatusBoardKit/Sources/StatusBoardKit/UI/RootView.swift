@@ -256,7 +256,7 @@ struct SplitRootView: View {
                 }
                 ShareLink(item: boardJSON(board),
                           preview: SharePreview(board.name)) {
-                    Label("Share as JSON", systemImage: "curlybraces")
+                    Label("Share as JSON — Credentials Omitted", systemImage: "curlybraces")
                 }
             } label: {
                 Label("Share Board", systemImage: "square.and.arrow.up")
@@ -274,7 +274,7 @@ struct SplitRootView: View {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(board) else { return "{}" }
+        guard let data = try? encoder.encode(board.redactedForExternalTransfer()) else { return "{}" }
         return String(decoding: data, as: UTF8.self)
     }
 }
@@ -647,6 +647,7 @@ struct TVMenuView: View {
                 header
                 boardsSection
                 schoolSection
+                bridgeAccessSection
                 displaySection
                 cycleSection
                 footer
@@ -740,6 +741,17 @@ struct TVMenuView: View {
                       isSelected: fillsScreen) {
                 fillsScreen = true
             }
+        }
+    }
+
+    private var bridgeAccessSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            sectionHeader("Mac Bridge Access",
+                          detail: "Only needed when the Mac bridge is protected with a token")
+            SecureField("Bridge token", text: Binding(
+                get: { model.bridgeClient.token },
+                set: { model.bridgeClient.token = $0 }))
+                .textContentType(.password)
         }
     }
 

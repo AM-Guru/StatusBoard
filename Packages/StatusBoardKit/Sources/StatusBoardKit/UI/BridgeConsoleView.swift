@@ -11,7 +11,9 @@ public struct BridgeConsoleView: View {
     }
 
     var sampleCurl: String {
-        "curl -X POST http://localhost:\(server.port)/api/push -d '{\"key\":\"cpu\",\"number\":42,\"unit\":\"%\",\"history\":120}'"
+        let authorization = server.token.isEmpty
+            ? "" : " -H 'X-StatusBoard-Token: \(server.token)'"
+        return "curl -X POST http://localhost:\(server.port)/api/push\(authorization) -d '{\"key\":\"cpu\",\"number\":42,\"unit\":\"%\",\"history\":120}'"
     }
 
     public var body: some View {
@@ -31,6 +33,9 @@ public struct BridgeConsoleView: View {
                 TextField("Port", value: $server.port, format: .number.grouping(.never))
                     .disabled(server.isRunning)
                 SecureField("Token (optional)", text: $server.token)
+                Text("When set, data pushes and subscribing devices must use this token. Enter the same token in the Apple TV bridge settings.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 Toggle("Publish this Mac's system metrics (mac.cpu, mac.memory, …)",
                        isOn: $server.publishesSystemMetrics)
                 Button(server.isRunning ? "Stop Bridge" : "Start Bridge") {

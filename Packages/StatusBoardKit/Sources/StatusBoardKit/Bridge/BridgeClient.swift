@@ -23,6 +23,14 @@ public final class BridgeClient {
     public private(set) var connectionState: ConnectionState = .disconnected
     /// When true, automatically connect to the first bridge that appears.
     public var autoConnect = true
+    /// Optional secret required by a protected Mac bridge. Stored in the app
+    /// group so extensions and the app agree, but never placed in a dashboard.
+    public var token: String {
+        didSet {
+            let defaults = UserDefaults(suiteName: SBIdentifiers.appGroup) ?? .standard
+            defaults.set(token, forKey: "sb.bridgeToken")
+        }
+    }
 
     /// What this client tells the Mac it is, sent once per connection right
     /// after the handshake. Nil sends nothing, which is exactly how every
@@ -47,7 +55,10 @@ public final class BridgeClient {
     @ObservationIgnored private var pendingK12: [String: CheckedContinuation<DataSnapshot?, Never>] = [:]
     @ObservationIgnored private var reconnectTask: Task<Void, Never>?
 
-    public init() {}
+    public init() {
+        let defaults = UserDefaults(suiteName: SBIdentifiers.appGroup) ?? .standard
+        token = defaults.string(forKey: "sb.bridgeToken") ?? ""
+    }
 
     public var isConnected: Bool {
         if case .connected = connectionState { return true }
@@ -99,7 +110,7 @@ public final class BridgeClient {
                 guard let self else { return }
                 switch state {
                 case .ready:
-                    var handshake = Data(BridgeMessage.subscribeHandshake.utf8)
+                    var handshake = Data(BridgeMessage.subscribeHandshake(token: self.token).utf8)
                     handshake.append(0x0A)
                     connection.send(content: handshake, completion: .contentProcessed { _ in })
                     // Straight after the handshake, before anything is asked

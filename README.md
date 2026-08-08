@@ -26,7 +26,7 @@ the developer has no way to see your data.
 | Graph | 12 chart styles — line, smooth, area, bars, lollipop, strip, delta, threshold, peak, radial, waveform, matrix heatmap — from a JSON URL **or** live bridge data |
 | Progress | 0–100% in 7 formats: bar, ring, watch dial, dots, stack, matrix, gradient |
 | RSS Feed | Headlines from any RSS/Atom feed — list or big rotating **ticker** |
-| Calendar | Upcoming events from the system calendar (iPhone/iPad/Mac) |
+| Calendar | Upcoming events from the system calendar; the latest event feed syncs through private iCloud for Apple TV |
 | Web Clip | A live web page, or **just a region of one** (see below); the Mac bridge renders and crops it for Apple TV |
 | Image | A fetched image with optional Core Image filter chains (`sepia:70,blur:20`, pixelate, grayscale, invert) |
 | Table | JSON/CSV tables with zebra striping and semantic status coloring (`success`/`degraded`/`failed`/`building`…) |
@@ -99,6 +99,11 @@ the developer has no way to see your data.
   for the board. The Apple TV layout also draws a **TV-safe guide**: anything
   outside the dashed line is at risk of being cropped by the television's
   overscan.
+- **Zoomable device previews** — pinch or use the 50–300% preview slider while
+  arranging another screen, then scroll around the target canvas. Zoom is only
+  an editing aid and never changes the saved layout.
+- **Board content scaling** — choose 75–200% content size; scrolling platforms
+  grow and scroll instead of clipping, while Apple TV stays inside its safe area.
 - **Smart glasses** — Status Board doesn't run on a pair of Even Realities G2s;
   [SybilSight](https://sybilsight.com) does, and it draws Status Board's boards
   on the lenses. Turn the Mac bridge on, switch Status Board on in SybilSight,
@@ -122,7 +127,14 @@ the developer has no way to see your data.
 - **Graphs of anything** — a Graph panel with a JSON URL and a value path
   samples one number per refresh and charts its accumulated history.
 - **Lock Screen widgets** on iOS (inline, circular gauge, rectangular) plus the
-  Home Screen/desktop widget families.
+  Home Screen/desktop widget families. Every panel kind is eligible, including
+  static clocks, countdowns, and text; widgets resolve the source board's theme
+  unless the panel keeps a fixed theme of its own.
+- **Shared panels across dashboards** — place one panel on several boards from
+  its context menu. Its title, source settings, data, and appearance update as
+  one, while every board and device keeps its own frame. Choose “Make
+  Independent” to fork one placement. A shared panel set to the Status Board
+  theme adopts each board's theme; an explicit panel theme stays fixed.
 - **Apple TV menu** — swipe down (or click) for a ten-foot menu that picks which
   of your iCloud-synced boards this Apple TV shows. The choice is remembered per
   device, so each screen in the house can sit on its own board, and it is
@@ -177,8 +189,10 @@ the developer has no way to see your data.
 - **Spotlight & Handoff** — boards and panels are indexed with their latest
   values, so searching "CPU" from the Home Screen or ⌘-Space jumps straight to
   the board; the visible board is published for Handoff to your other devices.
-- **Boards grow to fit** — adding, duplicating, or pasting a panel onto a full
-  board extends the grid instead of stacking panels on top of each other.
+- **Boards stop at their content** — empty rows below the last visible panel are
+  not drawn or scrolled. A full fixed grid is not silently stretched; a newly
+  added panel is selected above the least-crowded area so the user can decide
+  which layout should move.
 - **Clips survive re-renders** — region isolation works by hiding siblings up
   the ancestor chain and neutralizing their layout, so the region is promoted to
   the top of the page rather than scrolled to. A MutationObserver re-applies it
@@ -187,8 +201,9 @@ the developer has no way to see your data.
   (`data.items[*].price`, wildcards and negative indices supported).
 - **Mac bridge**: the macOS app runs a Bonjour-advertised server that accepts
   pushes from shell scripts, CI, and AI tools, and relays them live to every
-  iPhone/iPad/Apple TV on the network. It also hands its boards to display-only
-  devices, and renders web clips offscreen for tvOS (which has no WebKit).
+  iPhone/iPad/Apple TV on the network. It also relays values fetched by the Mac
+  itself (including Calendar), hands its boards and cached values to newly
+  connected displays, and renders web clips offscreen for tvOS (which has no WebKit).
 - **MCP client**: panels can call tools on MCP servers over streamable HTTP
   (all platforms) or stdio (macOS spawns the server process).
 - **Widgets**: a configurable WidgetKit widget (iOS + macOS) shows any panel's
@@ -252,10 +267,10 @@ publishes its own vitals every 5 seconds — `mac.cpu`, `mac.memory`, `mac.disk`
 any device and you have a live Mac monitoring wall with no scripting at all.
 Turn it off in the Bridge Console if you prefer.
 
-The server also (configurable in the
-Bridge Console window, with an optional shared-secret token). Devices discover
-it via Bonjour (`_statusboard._tcp`) and subscribe over TCP; every push is
-relayed to all connected devices instantly.
+The server is configurable in the Bridge Console window. An optional shared
+secret protects both data pushes and device subscriptions; enter the same token
+in Apple TV's bridge settings. Devices discover it via Bonjour
+(`_statusboard._tcp`) and subscribe over TCP; every push is relayed instantly.
 
 Push from any terminal, script, cron job, or AI tool:
 
@@ -315,9 +330,12 @@ the result (numbers become big LCD digits; text renders as monospace).
 
 ## Widgets
 
-Add the "Status Board Panel" widget on iOS or macOS and choose any panel from
-its configuration. Widgets read the latest snapshots from the shared App Group,
-so they keep showing data even when the app is closed.
+Add the "Status Board Panel" widget on iOS, macOS, or a watch face and choose
+any panel from its configuration. Widgets read the latest snapshots and panel
+metadata from the shared App Group, so they keep showing data when the app is
+closed. Clock, countdown, and text panels render from their settings without a
+snapshot. A panel on its default theme adopts the selected board's theme; a
+panel with an explicit theme keeps that fixed appearance.
 
 ## School panels
 
@@ -390,8 +408,10 @@ so they render identically and can sit side by side on one board.
 - **HomeKit** needs no setup at all: it reads the accessories already paired to
   your Apple ID, and only reads — it never controls anything. There is **no
   HomeKit framework on macOS**, so add these panels on an iPhone, iPad or Apple
-  TV; a Mac board shows the values they fetched, through iCloud sync, the same
-  way Health panels work.
+  TV; the latest non-camera reading follows the panel through the user's private
+  CloudKit database, so a Mac can display it. Equipment history and camera
+  frames never sync. Health values remain device-local unless the user explicitly
+  enables “Sync Latest Value with Private iCloud” on that Health panel.
 - **Home Assistant** wants your server's address and a long-lived access token
   (profile ▸ Security). Rooms come from Home Assistant's own **areas**, read
   over the REST API via a rendered template, so nothing has to be typed twice.

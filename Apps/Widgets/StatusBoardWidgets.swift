@@ -116,6 +116,7 @@ struct SelectPanelIntent: WidgetConfigurationIntent {
 
 struct PanelEntry: TimelineEntry {
     let date: Date
+    let panelID: String
     let title: String
     let kind: PanelKind
     let record: SnapshotRecord?
@@ -123,11 +124,18 @@ struct PanelEntry: TimelineEntry {
     /// to know whether the board reads in Celsius or Fahrenheit, and which
     /// question a home panel was asking.
     var settings = PanelSettings()
+    var boardAppearance = BoardAppearance()
+
+    var panel: Panel {
+        Panel(id: UUID(uuidString: panelID) ?? UUID(), kind: kind, title: title,
+              frame: GridRect(x: 0, y: 0, width: 1, height: 1), settings: settings)
+    }
 }
 
 struct PanelTimelineProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> PanelEntry {
-        PanelEntry(date: Date(), title: "Status Board", kind: .bridge,
+        PanelEntry(date: Date(), panelID: "00000000-0000-0000-0000-000000000000",
+                   title: "Status Board", kind: .bridge,
                    record: SnapshotRecord(snapshot: .number(42, unit: "%")))
     }
 
@@ -136,8 +144,13 @@ struct PanelTimelineProvider: AppIntentTimelineProvider {
     }
 
     func timeline(for configuration: SelectPanelIntent, in context: Context) async -> Timeline<PanelEntry> {
-        Timeline(entries: [entry(for: configuration)],
-                 policy: .after(Date().addingTimeInterval(15 * 60)))
+        let entry = entry(for: configuration)
+        // Static time panels have no fetched snapshot to trigger a reload.
+        // WidgetKit ultimately controls the budget, but asking once a minute
+        // keeps clocks and countdowns useful instead of freezing for 15 minutes.
+        let interval: TimeInterval = (entry.kind == .clock || entry.kind == .countdown) ? 60 : 15 * 60
+        return Timeline(entries: [entry],
+                        policy: .after(Date().addingTimeInterval(interval)))
     }
 
     #if os(watchOS)
@@ -162,12 +175,15 @@ struct PanelTimelineProvider: AppIntentTimelineProvider {
         let state = WidgetSharedState.load()
         let info = state.panel(id: configuration.panel?.id, onBoard: configuration.board?.id)
         return PanelEntry(date: Date(),
+                          panelID: info?.panelID ?? configuration.panel?.id
+                              ?? "00000000-0000-0000-0000-000000000000",
                           // The live mirror wins over the configuration, so a
                           // renamed panel renames on the widget too.
                           title: info?.title ?? configuration.panel?.title ?? "Status Board",
                           kind: info?.kind ?? .bridge,
                           record: info.flatMap { state.records[$0.key] },
-                          settings: info?.settings ?? PanelSettings())
+                          settings: info?.settings ?? PanelSettings(),
+                          boardAppearance: info?.boardAppearance ?? BoardAppearance())
     }
 }
 
@@ -179,6 +195,25 @@ struct PanelWidgetEntryView: View {
 
     /// The panel's headline value, for the compact accessory families.
     var summaryValue: String {
+        switch entry.kind {
+        case .clock:
+            let formatter = DateFormatter()
+            formatter.timeZone = entry.settings.timeZoneID.flatMap(TimeZone.init(identifier:))
+                ?? .current
+            formatter.dateStyle = .none
+            formatter.timeStyle = .short
+            return formatter.string(from: entry.date)
+        case .countdown:
+            guard let target = entry.settings.targetDate else { return "Set a date" }
+            let seconds = max(0, Int(target.timeIntervalSince(entry.date)))
+            if seconds >= 86_400 { return "\(seconds / 86_400)d \((seconds % 86_400) / 3_600)h" }
+            if seconds >= 3_600 { return "\(seconds / 3_600)h \((seconds % 3_600) / 60)m" }
+            return "\(seconds / 60)m"
+        case .text:
+            return String((entry.settings.text ?? "No text").prefix(60))
+        default:
+            break
+        }
         switch entry.record?.snapshot {
         case .number(let value, let unit):
             let text = value == value.rounded() && abs(value) < 1e15
@@ -277,26 +312,22 @@ struct PanelWidgetEntryView: View {
             }
         }
         .containerBackground(for: .widget) {
-            SBTheme.background
+            let theme = SBPanelStyle.themeName(panel: entry.panel,
+                                               board: entry.boardAppearance)
+            Color(hex: theme.palette.boardBackground.first ?? 0x0E1013)
         }
+        .environment(\.sbStyle, SBPanelStyle.resolve(panel: entry.panel,
+                                                    board: entry.boardAppearance))
+        // WidgetKit snapshots are static. This makes web clips, maps, camera
+        // panels, animated wallpapers, and scrolling panel content use their
+        // deterministic non-interactive renderers instead of embedding views
+        // WidgetKit cannot keep alive.
+        .environment(\.isStaticRender, true)
     }
 
     var fullPanel: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 5) {
-                Image(systemName: entry.kind.symbolName)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(SBTheme.accent)
-                Text(entry.title.uppercased())
-                    .font(SBTheme.titleFont(size: 10))
-                    .foregroundStyle(SBTheme.textSecondary)
-                    .kerning(1)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            SnapshotContentView(record: entry.record, settings: entry.settings)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
+        PanelView(panel: entry.panel, record: entry.record,
+                  boardAppearance: entry.boardAppearance)
     }
 }
 

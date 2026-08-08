@@ -26,6 +26,7 @@ public struct BoardView: View {
     /// Multiplier keeping the editing chrome a usable size when the board it
     /// sits on has been scaled down — see `sbEditorControlScale`.
     @Environment(\.sbEditorControlScale) private var controlScale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Gaps between panels. The board's appearance can open this up, which
     /// suits a wallpaper showing through — so it is read per board rather than
@@ -70,7 +71,9 @@ public struct BoardView: View {
                 // with the grid, so nothing scrolls into empty rows.
                 let canvas = SBBoardCanvas(screenHeight: proxy.size.height, spacing: spacing,
                                            grid: grid, panels: panels, device: device,
-                                           isEditing: isEditing)
+                                           isEditing: isEditing,
+                                           contentScale: CGFloat(board.appearance.contentScale)
+                                               * dynamicTypeContentScale)
                 let cellHeight = canvas.rowHeight
                 let scrolls = canvas.scrolls
                 let height = canvas.height
@@ -123,6 +126,14 @@ public struct BoardView: View {
             }
             .ignoresSafeArea()
         }
+    }
+
+    /// Panel typography is geometry-driven so it can remain balanced inside a
+    /// dashboard tile. Accessibility Dynamic Type therefore enlarges the grid
+    /// rows as well as ordinary SwiftUI labels, preserving that relationship
+    /// and allowing the board to scroll instead of clipping enlarged content.
+    private var dynamicTypeContentScale: CGFloat {
+        dynamicTypeSize.isAccessibilitySize ? 1.35 : 1
     }
 
     // MARK: - Empty state
@@ -238,6 +249,12 @@ public struct BoardView: View {
                 if isEditing { model.selectedPanelID = panel.id }
             }
             .contextMenu { if !isPreview { panelContextMenu(panel) } }
+            .accessibilityAction(named: Text("Configure")) {
+                if !isPreview { model.inspectedPanelID = panel.id }
+            }
+            .accessibilityAction(named: Text("Refresh")) {
+                if !isPreview, panel.kind.isFetched { model.engine.refreshNow(panel: panel) }
+            }
             #endif
             .overlay {
                 if isEditing {
@@ -303,6 +320,32 @@ public struct BoardView: View {
             PanelPasteboard.copy(panel)
         } label: {
             Label("Copy", systemImage: "doc.on.doc")
+        }
+        if model.store.dashboards.count > 1 {
+            Menu {
+                ForEach(model.store.dashboards.filter { $0.id != dashboardID }) { target in
+                    Button {
+                        _ = model.store.sharePanel(id: panel.id, from: dashboardID, to: target.id)
+                    } label: {
+                        if model.store.dashboardContainsSharedPanel(panel, dashboardID: target.id) {
+                            Label(target.name, systemImage: "checkmark")
+                        } else {
+                            Text(target.name)
+                        }
+                    }
+                    .disabled(model.store.dashboardContainsSharedPanel(panel,
+                                                                       dashboardID: target.id))
+                }
+            } label: {
+                Label("Share on Dashboard", systemImage: "rectangle.on.rectangle.angled")
+            }
+        }
+        if panel.isSharedAcrossDashboards {
+            Button {
+                model.store.unlinkPanel(id: panel.id, in: dashboardID)
+            } label: {
+                Label("Make Independent", systemImage: "link.badge.plus")
+            }
         }
         Divider()
         Button(role: .destructive) {

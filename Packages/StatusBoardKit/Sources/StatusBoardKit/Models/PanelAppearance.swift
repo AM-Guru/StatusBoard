@@ -365,6 +365,10 @@ public struct BoardAppearance: Codable, Hashable, Sendable {
     public var animates: Bool = true
     /// Space between panels, in points. Roomier boards suit wallpapers.
     public var panelSpacing: Double = 10
+    /// Scales panel content by changing the grid's physical row height on
+    /// scrolling platforms. This is separate from editor preview zoom: it is
+    /// part of the board and follows it to the device that displays it.
+    public var contentScale: Double = 1
 
     public init() {}
 
@@ -379,7 +383,7 @@ public struct BoardAppearance: Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case theme, appliesThemeToPanels, backgroundColorHex, gradientColorHexes, gradientAngle
         case wallpaper, backgroundImageURL, imageFill, backgroundOpacity, backgroundBlur
-        case scrim, animates, panelSpacing
+        case scrim, animates, panelSpacing, contentScale
     }
 
     public init(from decoder: Decoder) throws {
@@ -397,5 +401,6 @@ public struct BoardAppearance: Codable, Hashable, Sendable {
         scrim = try container.decodeIfPresent(Double.self, forKey: .scrim) ?? 0
         animates = try container.decodeIfPresent(Bool.self, forKey: .animates) ?? true
         panelSpacing = try container.decodeIfPresent(Double.self, forKey: .panelSpacing) ?? 10
+        contentScale = try container.decodeIfPresent(Double.self, forKey: .contentScale) ?? 1
     }
 }

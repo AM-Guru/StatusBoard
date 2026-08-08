@@ -58,6 +58,12 @@ public struct PanelInspectorView: View {
             Form {
                 Section("Panel") {
                     TextField("Title", text: $draft.title)
+                    if draft.isSharedAcrossDashboards {
+                        Label("Shared across \(model.store.linkedPlacementCount(for: draft)) dashboards. Content and appearance changes update every placement; layout stays independent.",
+                              systemImage: "link")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                     if draft.kind.isFetched {
                         Picker("Refresh", selection: $draft.settings.refreshSeconds) {
                             Text("30 seconds").tag(30.0)
@@ -69,6 +75,7 @@ public struct PanelInspectorView: View {
                     }
                 }
                 kindSections
+                portableSnapshotSection
                 appearanceSection
                 alertSection
                 liveActivitySection
@@ -362,7 +369,7 @@ public struct PanelInspectorView: View {
                         Text(metric.displayName).tag(metric)
                     }
                 }
-                Text("Reads from Health on this device. Other devices see the value via iCloud sync.")
+                Text("Reads from Health on this device. Cross-device value sync is off by default and can be enabled below.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
@@ -1097,6 +1104,40 @@ public struct PanelInspectorView: View {
     }
 
     // MARK: - Shared sections
+
+    @ViewBuilder
+    private var portableSnapshotSection: some View {
+        if draft.kind == .homeKit && draft.settings.homeMode == .camera {
+            Section("Across Devices") {
+                Label("Camera frames stay on this device", systemImage: "lock.shield")
+                Text("Camera images are never stored in iCloud. Other boards and devices can use their own live camera connection.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        } else if draft.kind == .calendar || draft.kind == .homeKit || draft.kind == .health {
+            Section("Across Devices") {
+                Toggle("Sync Latest Value with Private iCloud", isOn: Binding(
+                    get: { draft.sharesLatestSnapshotViaICloud },
+                    set: { draft.settings.syncSnapshotToICloud = $0 }))
+                Text(portableSnapshotExplanation)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var portableSnapshotExplanation: String {
+        switch draft.kind {
+        case .calendar:
+            return "Syncs this panel's event titles and start times so it works on Apple TV, which cannot read Calendar directly. Stored only in your private CloudKit database."
+        case .homeKit:
+            return "Syncs the latest sensor or thermostat reading so Macs can display it. Camera frames and equipment history are never synced."
+        case .health:
+            return "Off by default. If enabled, only this panel's latest rendered Health value is stored in your private CloudKit database so devices without HealthKit can display it."
+        default:
+            return ""
+        }
+    }
 
     @ViewBuilder
     private var appearanceSection: some View {

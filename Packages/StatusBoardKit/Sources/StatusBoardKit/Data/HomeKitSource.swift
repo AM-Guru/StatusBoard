@@ -208,13 +208,14 @@ public final class HomeKitBridge: NSObject, HMHomeManagerDelegate {
         await ready().homes.map(\.name)
     }
 
-    /// The home a panel is pinned to, or the primary one.
+    /// The home a panel is pinned to, or the first HomeKit home. Apple removed
+    /// support for `primaryHome`; a user who has several can pin one explicitly.
     private func home(named name: String?, in manager: HMHomeManager) -> HMHome? {
         if let name, !name.isEmpty,
            let match = manager.homes.first(where: { $0.name == name }) {
             return match
         }
-        return manager.primaryHome ?? manager.homes.first
+        return manager.homes.first
     }
 
     // MARK: - Pickers

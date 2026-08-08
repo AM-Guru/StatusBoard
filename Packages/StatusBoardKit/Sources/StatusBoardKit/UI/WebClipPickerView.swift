@@ -409,22 +409,24 @@ final class PickerWebController: NSObject, WKScriptMessageHandler, WKNavigationD
 
     nonisolated func userContentController(_ userContentController: WKUserContentController,
                                            didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any] else { return }
-        let event = body["event"] as? String ?? "selected"
-        if event == "cleared" {
-            Task { @MainActor in self.onSelectionChange?(nil) }
-            return
+        Task { @MainActor in
+            guard let body = message.body as? [String: Any] else { return }
+            let event = body["event"] as? String ?? "selected"
+            if event == "cleared" {
+                self.onSelectionChange?(nil)
+                return
+            }
+            guard let selector = body["selector"] as? String, !selector.isEmpty else { return }
+            let selection = Selection(
+                selector: selector,
+                tag: body["tag"] as? String ?? "",
+                text: body["text"] as? String ?? "",
+                width: (body["width"] as? NSNumber)?.intValue ?? 0,
+                height: (body["height"] as? NSNumber)?.intValue ?? 0,
+                canExpand: (body["canExpand"] as? NSNumber)?.boolValue ?? false,
+                canContract: (body["canContract"] as? NSNumber)?.boolValue ?? false)
+            self.onSelectionChange?(selection)
         }
-        guard let selector = body["selector"] as? String, !selector.isEmpty else { return }
-        let selection = Selection(
-            selector: selector,
-            tag: body["tag"] as? String ?? "",
-            text: body["text"] as? String ?? "",
-            width: (body["width"] as? NSNumber)?.intValue ?? 0,
-            height: (body["height"] as? NSNumber)?.intValue ?? 0,
-            canExpand: (body["canExpand"] as? NSNumber)?.boolValue ?? false,
-            canContract: (body["canContract"] as? NSNumber)?.boolValue ?? false)
-        Task { @MainActor in self.onSelectionChange?(selection) }
     }
 
     nonisolated func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

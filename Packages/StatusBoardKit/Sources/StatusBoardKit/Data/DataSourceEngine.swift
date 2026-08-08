@@ -143,6 +143,13 @@ public final class DataSourceEngine {
         case .feed:
             return await FeedParser.fetch(settings: panel.settings)
         case .calendar:
+            #if os(tvOS)
+            // tvOS cannot read EventKit. Once a Mac bridge is connected, keep
+            // the last relayed Calendar snapshot instead of overwriting it with
+            // a local "unavailable" error every retry interval.
+            if bridgeClient?.isConnected == true { return nil }
+            if case .feed? = snapshots.record(for: panel.snapshotKey)?.snapshot { return nil }
+            #endif
             return await CalendarSource.fetch(settings: panel.settings)
         case .image:
             return await ImageSource.fetch(settings: panel.settings)
@@ -179,6 +186,10 @@ public final class DataSourceEngine {
         case .logs:
             return await LogAnalyticsSource.fetch(settings: panel.settings)
         case .health:
+            #if os(macOS) || os(tvOS)
+            if let existing = snapshots.record(for: panel.snapshotKey),
+               !existing.snapshot.isError { return nil }
+            #endif
             return await HealthSource.fetch(settings: panel.settings)
         case .canvas:
             return await CanvasSource.fetch(settings: panel.settings)
@@ -197,6 +208,10 @@ public final class DataSourceEngine {
         case .tessie:
             return await TessieSource.fetch(settings: panel.settings)
         case .homeKit:
+            #if os(macOS)
+            if let existing = snapshots.record(for: panel.snapshotKey),
+               !existing.snapshot.isError { return nil }
+            #endif
             // Returns nil for a live camera panel — HomeKit hands over a view,
             // not an image, so the panel renders it and there is nothing to
             // store. Leaving the old snapshot alone is the right behaviour.

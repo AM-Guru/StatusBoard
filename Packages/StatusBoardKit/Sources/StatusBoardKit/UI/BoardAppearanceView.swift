@@ -107,6 +107,12 @@ public struct BoardAppearanceView: View {
                     Text("\(Int(draft.panelSpacing)) pt between panels. Wider gaps let more of the background through — which is what makes a picture masked across several panels read as one image.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                    LabeledContent("Content size") {
+                        Slider(value: $draft.contentScale, in: 0.75...2, step: 0.05)
+                    }
+                    Text("\(Int((draft.contentScale * 100).rounded()))%. Larger content scrolls on iPhone, iPad, Mac, and Apple Watch rather than being clipped. Apple TV always fits its safe area.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     Toggle("Animate", isOn: $draft.animates)
                         .disabled(!draft.wallpaper.isAnimated)
                 }

@@ -519,17 +519,22 @@ public struct SBBoardCanvas: Equatable, Sendable {
 
     /// - Parameters:
     ///   - screenHeight: the room the board has, inside its own padding.
+    ///   - contentScale: user and accessibility scaling on scrolling screens.
     ///   - isEditing: while arranging, the canvas keeps every declared row —
     ///     the empty ones are where a panel is dragged to.
     public init(screenHeight: CGFloat, spacing: CGFloat, grid: BoardGrid,
-                panels: [Panel], device: SBDeviceClass, isEditing: Bool) {
+                panels: [Panel], device: SBDeviceClass, isEditing: Bool,
+                contentScale: CGFloat = 1) {
         self.screenHeight = screenHeight
         let rows = CGFloat(max(1, grid.rows))
         let fitted = (screenHeight - spacing) / rows
         // A row is never drawn shorter than the screen can read. When the board
         // has more rows than that allows, it grows past the bottom of the screen
         // and scrolls instead of squeezing every panel into an unreadable sliver.
-        rowHeight = device.allowsScrolling ? max(fitted, device.minimumRowHeight) : fitted
+        let readable = max(fitted, device.minimumRowHeight)
+        rowHeight = device.allowsScrolling
+            ? readable * min(2, max(0.75, contentScale))
+            : fitted
         let filled = panels.map { $0.frame.y + $0.frame.height }.max() ?? 0
         let drawn = isEditing ? max(1, grid.rows) : max(1, min(grid.rows, filled))
         contentHeight = rowHeight * CGFloat(drawn) + spacing

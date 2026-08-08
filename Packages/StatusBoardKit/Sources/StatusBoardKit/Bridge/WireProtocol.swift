@@ -209,6 +209,11 @@ public enum BridgeMessage: Codable, Sendable {
 
     public static let subscribeHandshake = "SB SUBSCRIBE 1"
 
+    public static func subscribeHandshake(token: String) -> String {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? subscribeHandshake : "\(subscribeHandshake) \(trimmed)"
+    }
+
     public func encodedLine() -> Data? {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

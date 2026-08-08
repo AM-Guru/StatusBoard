@@ -141,7 +141,7 @@ public enum IntentDataBridge {
         if var data = try? encoder.encode(entry) {
             data.append(0x0A)
             if let handle = try? FileHandle(forWritingTo: spoolURL) {
-                try? handle.seekToEnd()
+                _ = try? handle.seekToEnd()
                 try? handle.write(contentsOf: data)
                 try? handle.close()
             } else {

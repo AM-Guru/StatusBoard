@@ -30,9 +30,14 @@ public enum CanvasSource {
         }
     }
 
-    public static func fetch(settings: PanelSettings) async -> DataSnapshot {
-        // Falls back to whatever another Canvas panel was signed in with.
-        let config = await CanvasCredentials.resolved(settings.connector)
+    public static func fetch(settings: PanelSettings,
+                             inheritSharedCredentials: Bool = true) async -> DataSnapshot {
+        // Falls back to whatever another Canvas panel was signed in with. Tests
+        // and diagnostics can explicitly disable that fallback so their result
+        // is not contaminated by a real credential in the developer's Keychain.
+        let config = inheritSharedCredentials
+            ? await CanvasCredentials.resolved(settings.connector)
+            : (settings.connector ?? ConnectorConfig())
         guard var host = config.projectURL?.trimmingCharacters(in: .whitespaces), !host.isEmpty,
               let token = config.token, !token.isEmpty else {
             return .error("Enter your Canvas URL and access token in the panel settings")

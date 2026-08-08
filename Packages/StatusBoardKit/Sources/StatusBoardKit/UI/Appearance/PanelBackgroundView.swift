@@ -13,13 +13,15 @@ struct PanelBackgroundView: View {
     let accent: Color
 
     @Environment(\.sbBoardBackdrop) private var backdrop
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     private var palette: SBPalette { theme.palette }
 
     /// A theme can bring its own material — Glass is translucent by design —
     /// but an explicit choice on the panel wins.
     private var material: PanelMaterialStyle {
-        appearance.material != .none ? appearance.material
+        if reduceTransparency { return .none }
+        return appearance.material != .none ? appearance.material
             : (appearance.backgroundStyle == .theme ? palette.material : .none)
     }
 
@@ -29,7 +31,8 @@ struct PanelBackgroundView: View {
             fillLayer
                 .overlay { dynamicLayer }
                 .blur(radius: appearance.backgroundBlur)
-                .opacity(min(1, max(0, appearance.backgroundOpacity)))
+                .opacity(reduceTransparency ? 1
+                         : min(1, max(0, appearance.backgroundOpacity)))
             if appearance.scrim > 0 {
                 (palette.isLight ? Color.white : Color.black)
                     .opacity(min(1, max(0, appearance.scrim)))
@@ -55,7 +58,7 @@ struct PanelBackgroundView: View {
         case .theme:
             SBGradientFill(colors: palette.background.map(Color.init(hex:)),
                            angle: appearance.gradientAngle)
-                .opacity(palette.backgroundAlpha)
+                .opacity(reduceTransparency ? 1 : palette.backgroundAlpha)
         case .solid:
             appearance.backgroundColorHex.flatMap(Color.init(hexString:))
                 ?? Color(hex: palette.background.first ?? 0x191D23)
@@ -75,10 +78,16 @@ struct PanelBackgroundView: View {
                                angle: appearance.gradientAngle)
             }
         case .material:
-            // The material below is the whole point; nothing else on top.
-            Color.clear
+            if reduceTransparency {
+                Color(hex: palette.background.first ?? 0x191D23)
+            } else {
+                // The material below is the whole point; nothing else on top.
+                Color.clear
+            }
         case .clear:
-            Color.clear
+            reduceTransparency
+                ? Color(hex: palette.background.first ?? 0x191D23)
+                : Color.clear
         }
     }
 
@@ -126,10 +135,11 @@ extension PanelAppearance {
     }
 
     /// The border color, honoring the theme's own alpha for translucent looks.
-    func resolvedBorderColor(theme: SBThemeName) -> Color {
+    func resolvedBorderColor(theme: SBThemeName,
+                             increasedContrast: Bool = false) -> Color {
         if let custom = borderColorHex.flatMap(Color.init(hexString:)) { return custom }
         let palette = theme.palette
-        return Color(hex: palette.border).opacity(palette.borderAlpha)
+        return Color(hex: palette.border).opacity(increasedContrast ? 1 : palette.borderAlpha)
     }
 
     func resolvedBorderWidth() -> CGFloat {

@@ -27,9 +27,11 @@ public final class CloudSyncEngine: NSObject {
     public private(set) var lastErrorMessage: String?
 
     @ObservationIgnored private let store: DashboardStore
+    @ObservationIgnored private let snapshots: SnapshotStore
     @ObservationIgnored private var engine: CKSyncEngine?
     @ObservationIgnored private var startTask: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var knownPortableSnapshotKeys: Set<String> = []
     @ObservationIgnored private let zoneID = CKRecordZone.ID(zoneName: "StatusBoards")
     @ObservationIgnored private let stateURL: URL
 
@@ -51,23 +53,33 @@ public final class CloudSyncEngine: NSObject {
     /// share carries no sign-in. The portal password, if you saved one, stays
     /// in its own device's Keychain.
     private static let sessionRecordName = "k12-session"
+    /// Rendered snapshots that opt into cross-device display are mirrored
+    /// through the same private zone as the board. Calendar and non-camera
+    /// HomeKit default on; privacy-sensitive Health data defaults off.
+    private static let portableSnapshotPrefix = "portable-snapshot-"
 
-    public init(store: DashboardStore) {
+    public init(store: DashboardStore, snapshots: SnapshotStore) {
         self.store = store
+        self.snapshots = snapshots
         self.stateURL = SBStorage.localSupportURL()
             .appendingPathComponent("cksync-state.data")
         super.init()
 
         store.onLocalSave = { [weak self] dashboard in
             self?.enqueueSave(dashboard.id)
+            self?.reconcilePortableSnapshots()
         }
         store.onLocalDelete = { [weak self] id in
             self?.enqueueDelete(id)
+            self?.reconcilePortableSnapshots()
         }
         // A session this device just signed in (or refreshed, or signed out of)
         // is the one thing the other devices can't produce for themselves.
         K12Session.shared.onChange { [weak self] payload in
             self?.enqueueSessionChange(payload)
+        }
+        snapshots.syncObserver = { [weak self] key, record in
+            self?.enqueuePortableSnapshot(key: key, record: record)
         }
     }
 
@@ -122,6 +134,11 @@ public final class CloudSyncEngine: NSObject {
         // the guard above: they consume the session, they never publish it.
         if K12Session.shared.payload != nil {
             enqueueSessionChange(K12Session.shared.payload)
+        }
+        for panel in store.allPanels where panel.sharesLatestSnapshotViaICloud {
+            if let record = snapshots.record(for: panel.snapshotKey) {
+                enqueuePortableSnapshot(key: panel.snapshotKey, record: record)
+            }
         }
     }
 
@@ -300,6 +317,48 @@ public final class CloudSyncEngine: NSObject {
         ])
     }
 
+    private func enqueuePortableSnapshot(key: String, record: SnapshotRecord) {
+        guard store.allPanels.contains(where: {
+            $0.sharesLatestSnapshotViaICloud && $0.snapshotKey == key
+        }) else { return }
+        // Defense in depth: no image payload is ever portable, even if a
+        // future panel setting accidentally opts a camera-like source in.
+        if case .image = record.snapshot { return }
+        // A permission/network error on one device must not replace usable
+        // events another device already supplied.
+        guard case .error = record.snapshot else {
+            knownPortableSnapshotKeys.insert(key)
+            engine?.state.add(pendingRecordZoneChanges: [
+                .saveRecord(portableSnapshotRecordID(for: key))
+            ])
+            return
+        }
+    }
+
+    private func reconcilePortableSnapshots() {
+        let desired = Set(store.allPanels
+            .filter(\.sharesLatestSnapshotViaICloud)
+            .map(\.snapshotKey))
+        let removed = knownPortableSnapshotKeys.subtracting(desired)
+        if !removed.isEmpty {
+            engine?.state.add(pendingRecordZoneChanges: removed.map {
+                .deleteRecord(portableSnapshotRecordID(for: $0))
+            })
+        }
+        knownPortableSnapshotKeys.subtract(removed)
+    }
+
+    private func portableSnapshotRecordID(for key: String) -> CKRecord.ID {
+        CKRecord.ID(recordName: Self.portableSnapshotPrefix + key, zoneID: zoneID)
+    }
+
+    private func portableSnapshotKey(from recordID: CKRecord.ID) -> String? {
+        let name = recordID.recordName
+        guard name.hasPrefix(Self.portableSnapshotPrefix) else { return nil }
+        let key = String(name.dropFirst(Self.portableSnapshotPrefix.count))
+        return key.isEmpty ? nil : key
+    }
+
     // MARK: - State serialization
 
     private func loadStateSerialization() -> CKSyncEngine.State.Serialization? {
@@ -335,11 +394,48 @@ public final class CloudSyncEngine: NSObject {
         return record
     }
 
+    private func makePortableSnapshotRecord(key: String) -> CKRecord? {
+        guard store.allPanels.contains(where: {
+            $0.sharesLatestSnapshotViaICloud && $0.snapshotKey == key
+        }) else { return nil }
+        guard let snapshot = snapshots.record(for: key) else { return nil }
+        if case .error = snapshot.snapshot { return nil }
+        if case .image = snapshot.snapshot { return nil }
+        let record = CKRecord(recordType: Self.recordType,
+                              recordID: portableSnapshotRecordID(for: key))
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(snapshot) else { return nil }
+        record[Self.payloadKey] = data as NSData
+        return record
+    }
+
     private func decodeSession(from record: CKRecord) -> K12Session.SessionPayload? {
         guard let data = record[Self.payloadKey] as? Data else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(K12Session.SessionPayload.self, from: data)
+    }
+
+    private func decodeSnapshot(from record: CKRecord) -> SnapshotRecord? {
+        guard let data = record[Self.payloadKey] as? Data else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try? decoder.decode(SnapshotRecord.self, from: data)
+    }
+
+    /// Applies a portable value when its placement is opted in. With no board
+    /// yet, keep it in the local cache: CloudKit may deliver the snapshot before
+    /// the dashboard record, and discarding it would strand an Apple TV until
+    /// some source device happened to publish another change.
+    private func applyPortableSnapshot(_ record: SnapshotRecord, key: String) {
+        knownPortableSnapshotKeys.insert(key)
+        let placements = store.allPanels.filter { $0.snapshotKey == key }
+        guard placements.isEmpty || placements.contains(where: \.sharesLatestSnapshotViaICloud)
+        else { return }
+        // Do relay it through a Mac bridge, but do not enqueue the same
+        // CloudKit record as a fresh local change.
+        snapshots.setAll([key: record], notifySyncObserver: false)
     }
 
     private func decodeDashboard(from record: CKRecord) -> Dashboard? {
@@ -370,13 +466,23 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
         case .fetchedRecordZoneChanges(let changes):
             lastSyncDate = Date()
             lastErrorMessage = nil
+            // Boards first. CloudKit does not promise modification order, and
+            // the portable records are interpreted using panel privacy settings.
+            for modification in changes.modifications {
+                let record = modification.record
+                guard record.recordID.recordName != Self.sessionRecordName,
+                      portableSnapshotKey(from: record.recordID) == nil,
+                      let dashboard = decodeDashboard(from: record) else { continue }
+                store.applyRemote(dashboard)
+            }
             for modification in changes.modifications {
                 if modification.record.recordID.recordName == Self.sessionRecordName {
                     if let payload = decodeSession(from: modification.record) {
                         K12Session.shared.adopt(payload)
                     }
-                } else if let dashboard = decodeDashboard(from: modification.record) {
-                    store.applyRemote(dashboard)
+                } else if let key = portableSnapshotKey(from: modification.record.recordID),
+                          let record = decodeSnapshot(from: modification.record) {
+                    applyPortableSnapshot(record, key: key)
                 }
             }
             for deletion in changes.deletions {
@@ -397,6 +503,21 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
                        let serverRecord = failure.error.serverRecord,
                        let payload = decodeSession(from: serverRecord) {
                         K12Session.shared.adopt(payload)
+                    } else {
+                        lastErrorMessage = Self.describe(failure.error)
+                    }
+                } else if let key = portableSnapshotKey(from: failure.record.recordID) {
+                    if failure.error.code == .serverRecordChanged,
+                       let serverRecord = failure.error.serverRecord,
+                       let remote = decodeSnapshot(from: serverRecord) {
+                        let local = snapshots.record(for: key)
+                        if local == nil || remote.updatedAt >= local!.updatedAt {
+                            applyPortableSnapshot(remote, key: key)
+                        } else {
+                            syncEngine.state.add(pendingRecordZoneChanges: [
+                                .saveRecord(failure.record.recordID)
+                            ])
+                        }
                     } else {
                         lastErrorMessage = Self.describe(failure.error)
                     }
@@ -437,6 +558,9 @@ extension CloudSyncEngine: CKSyncEngineDelegate {
                 } else {
                     syncEngine.state.remove(pendingRecordZoneChanges: [.saveRecord(recordID)])
                 }
+            } else if let key = portableSnapshotKey(from: recordID),
+                      let record = makePortableSnapshotRecord(key: key) {
+                recordsByID[recordID] = record
             } else if let id = UUID(uuidString: recordID.recordName),
                let dashboard = store.dashboard(id: id),
                let record = makeRecord(for: dashboard) {

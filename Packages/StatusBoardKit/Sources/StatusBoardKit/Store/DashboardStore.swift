@@ -211,8 +211,51 @@ public final class DashboardStore {
     public func updatePanel(_ panel: Panel, in dashboardID: Dashboard.ID) {
         guard var board = dashboard(id: dashboardID),
               let index = board.panels.firstIndex(where: { $0.id == panel.id }) else { return }
-        board.panels[index] = panel
-        update(board, undoActionName: "Edit \(panel.title)")
+        guard let linkID = panel.linkedContentID else {
+            board.panels[index] = panel
+            update(board, undoActionName: "Edit \(panel.title)")
+            return
+        }
+
+        // One edit, one undo step, however many dashboard placements follow it.
+        // Frames and placement IDs deliberately stay local; everything that
+        // defines what the panel is and how it renders follows the shared copy.
+        let now = Date()
+        var edited = panel
+        edited.linkedContentModifiedAt = now
+        var pending: [(index: Int, board: Dashboard)] = []
+        for (boardIndex, original) in dashboards.enumerated() {
+            var candidate = original
+            var changed = false
+            for panelIndex in candidate.panels.indices
+            where candidate.panels[panelIndex].linkedContentID == linkID {
+                if candidate.id == dashboardID && candidate.panels[panelIndex].id == panel.id {
+                    if candidate.panels[panelIndex] != edited {
+                        candidate.panels[panelIndex] = edited
+                        changed = true
+                    }
+                } else {
+                    var follower = candidate.panels[panelIndex]
+                    follower.kind = edited.kind
+                    follower.title = edited.title
+                    follower.settings = edited.settings
+                    follower.linkedContentModifiedAt = now
+                    if follower != candidate.panels[panelIndex] {
+                        candidate.panels[panelIndex] = follower
+                        changed = true
+                    }
+                }
+            }
+            guard changed else { continue }
+            candidate.modifiedAt = now
+            pending.append((boardIndex, candidate))
+        }
+        guard !pending.isEmpty else { return }
+        recordUndo("Edit Shared \(panel.title)")
+        for entry in pending {
+            dashboards[entry.index] = entry.board
+            didEdit(entry.board)
+        }
     }
 
     public func addPanel(kind: PanelKind, to dashboardID: Dashboard.ID) -> Panel? {
@@ -355,6 +398,8 @@ public final class DashboardStore {
               let original = board.panels.first(where: { $0.id == id }) else { return nil }
         var copy = original
         copy.id = UUID()
+        copy.linkedContentID = nil
+        copy.linkedContentModifiedAt = nil
         copy.frame = board.makeRoom(width: original.frame.width,
                                     height: original.frame.height)
         board.panels.append(copy)
@@ -369,11 +414,79 @@ public final class DashboardStore {
         guard var board = dashboard(id: dashboardID) else { return nil }
         var inserted = panel
         inserted.id = UUID()
+        inserted.linkedContentID = nil
+        inserted.linkedContentModifiedAt = nil
         inserted.frame = board.makeRoom(width: panel.frame.width,
                                         height: panel.frame.height)
         board.panels.append(inserted)
         update(board, undoActionName: "Paste \(panel.title)")
         return inserted
+    }
+
+    /// Places one panel on another dashboard while keeping its content linked.
+    /// The destination gets an independent frame and per-device layouts, but a
+    /// later configuration change from either placement updates them all.
+    @discardableResult
+    public func sharePanel(id panelID: Panel.ID, from sourceDashboardID: Dashboard.ID,
+                           to targetDashboardID: Dashboard.ID) -> Panel? {
+        guard sourceDashboardID != targetDashboardID,
+              let sourceIndex = dashboards.firstIndex(where: { $0.id == sourceDashboardID }),
+              let targetIndex = dashboards.firstIndex(where: { $0.id == targetDashboardID }),
+              let panelIndex = dashboards[sourceIndex].panels.firstIndex(where: { $0.id == panelID })
+        else { return nil }
+
+        var source = dashboards[sourceIndex]
+        var target = dashboards[targetIndex]
+        var original = source.panels[panelIndex]
+        let linkID = original.linkedContentID ?? UUID()
+
+        if let existing = target.panels.first(where: { $0.linkedContentID == linkID }) {
+            return existing
+        }
+
+        let now = Date()
+        original.linkedContentID = linkID
+        original.linkedContentModifiedAt = now
+        source.panels[panelIndex] = original
+        var placement = original
+        placement.id = UUID()
+        placement.frame = target.makeRoom(width: original.frame.width,
+                                          height: original.frame.height)
+        target.panels.append(placement)
+
+        source.modifiedAt = now
+        target.modifiedAt = now
+        recordUndo("Share \(original.title)")
+        dashboards[sourceIndex] = source
+        dashboards[targetIndex] = target
+        didEdit(source)
+        didEdit(target)
+        return placement
+    }
+
+    /// Makes one placement independent without removing any of the others.
+    public func unlinkPanel(id panelID: Panel.ID, in dashboardID: Dashboard.ID) {
+        guard var board = dashboard(id: dashboardID),
+              let index = board.panels.firstIndex(where: { $0.id == panelID }),
+              board.panels[index].linkedContentID != nil else { return }
+        let title = board.panels[index].title
+        board.panels[index].linkedContentID = nil
+        board.panels[index].linkedContentModifiedAt = nil
+        update(board, undoActionName: "Unlink \(title)")
+    }
+
+    public func linkedPlacementCount(for panel: Panel) -> Int {
+        guard let linkID = panel.linkedContentID else { return 1 }
+        return dashboards.reduce(0) { count, board in
+            count + board.panels.count(where: { $0.linkedContentID == linkID })
+        }
+    }
+
+    public func dashboardContainsSharedPanel(_ panel: Panel,
+                                             dashboardID: Dashboard.ID) -> Bool {
+        guard let linkID = panel.linkedContentID,
+              let board = dashboard(id: dashboardID) else { return false }
+        return board.panels.contains { $0.linkedContentID == linkID }
     }
 
     // MARK: - Per-device layouts
@@ -462,7 +575,68 @@ public final class DashboardStore {
         if !selectionExists {
             selectedDashboardID = dashboards.first?.id
         }
+        reconcileLinkedPanels()
         scheduleSave()
+    }
+
+    /// CloudKit stores dashboards independently, so two records containing
+    /// placements of one shared panel can arrive in either order. Reconcile
+    /// them by the panel content revision and upload repaired authoring boards,
+    /// giving every device eventual consistency without coupling their frames.
+    private func reconcileLinkedPanels() {
+        struct Revision {
+            var panel: Panel
+            var date: Date
+        }
+
+        var newest: [UUID: Revision] = [:]
+        for board in dashboards {
+            for panel in board.panels {
+                guard let linkID = panel.linkedContentID else { continue }
+                let revision = Revision(panel: panel,
+                                        date: panel.linkedContentModifiedAt ?? board.modifiedAt)
+                if let current = newest[linkID] {
+                    let replaces = revision.date > current.date
+                        || (revision.date == current.date
+                            && revision.panel.id.uuidString > current.panel.id.uuidString)
+                    if replaces { newest[linkID] = revision }
+                } else {
+                    newest[linkID] = revision
+                }
+            }
+        }
+
+        var changedBoards: [Dashboard] = []
+        for boardIndex in dashboards.indices {
+            var board = dashboards[boardIndex]
+            var changed = false
+            var latestApplied = board.modifiedAt
+            for panelIndex in board.panels.indices {
+                guard let linkID = board.panels[panelIndex].linkedContentID,
+                      let revision = newest[linkID] else { continue }
+                var placement = board.panels[panelIndex]
+                if placement.kind != revision.panel.kind
+                    || placement.title != revision.panel.title
+                    || placement.settings != revision.panel.settings
+                    || placement.linkedContentModifiedAt != revision.date {
+                    placement.kind = revision.panel.kind
+                    placement.title = revision.panel.title
+                    placement.settings = revision.panel.settings
+                    placement.linkedContentModifiedAt = revision.date
+                    board.panels[panelIndex] = placement
+                    changed = true
+                    latestApplied = max(latestApplied, revision.date)
+                }
+            }
+            guard changed else { continue }
+            board.modifiedAt = latestApplied
+            dashboards[boardIndex] = board
+            changedBoards.append(board)
+        }
+
+        if authorsBoards {
+            for board in changedBoards { onLocalSave?(board) }
+        }
     }
 
     public func applyRemoteDeletion(id: Dashboard.ID) {

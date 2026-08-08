@@ -172,14 +172,27 @@ public enum PanelKind: String, Codable, CaseIterable, Sendable, Identifiable {
 
 public struct Panel: Identifiable, Codable, Hashable, Sendable {
     public var id: UUID
+    /// Shared content identity for a panel intentionally placed on more than
+    /// one dashboard. Each placement keeps its own `id` and `frame`, while the
+    /// title, kind, settings, fetched snapshot, and WidgetKit data stay linked.
+    /// Nil means this is an independent panel (the backward-compatible default).
+    public var linkedContentID: UUID?
+    /// Revision used to converge linked content when its dashboard records
+    /// arrive from CloudKit in a different order. Layout is intentionally not
+    /// part of this revision because every placement owns its own frame.
+    public var linkedContentModifiedAt: Date?
     public var kind: PanelKind
     public var title: String
     public var frame: GridRect
     public var settings: PanelSettings
 
-    public init(id: UUID = UUID(), kind: PanelKind, title: String,
-                frame: GridRect, settings: PanelSettings = PanelSettings()) {
+    public init(id: UUID = UUID(), linkedContentID: UUID? = nil,
+                linkedContentModifiedAt: Date? = nil,
+                kind: PanelKind, title: String, frame: GridRect,
+                settings: PanelSettings = PanelSettings()) {
         self.id = id
+        self.linkedContentID = linkedContentID
+        self.linkedContentModifiedAt = linkedContentModifiedAt
         self.kind = kind
         self.title = title
         self.frame = frame
@@ -193,7 +206,22 @@ public struct Panel: Identifiable, Codable, Hashable, Sendable {
                 return BridgeKeys.prefixed(key)
             }
         }
-        return id.uuidString
+        return (linkedContentID ?? id).uuidString
+    }
+
+    /// True when edits to this panel's content are replicated to another
+    /// dashboard placement. Layout remains local to each dashboard/device.
+    public var isSharedAcrossDashboards: Bool { linkedContentID != nil }
+
+    /// Whether this panel's latest rendered value follows the board through the
+    /// user's private CloudKit database. Calendar and HomeKit default on because
+    /// some Apple platforms cannot read those frameworks; Health defaults off
+    /// and requires an explicit privacy choice.
+    public var sharesLatestSnapshotViaICloud: Bool {
+        // Camera pixels are never portable, even if this panel used to be a
+        // sensor with an explicit opt-in before its mode was changed.
+        if kind == .homeKit && settings.homeMode == .camera { return false }
+        return settings.syncSnapshotToICloud ?? (kind == .calendar || kind == .homeKit)
     }
 }
 
@@ -527,6 +555,10 @@ public struct PanelSettings: Codable, Hashable, Sendable {
     public var alertAbove: Double?
     public var alertBelow: Double?
 
+    /// Explicit override for cross-device snapshot sync. Nil uses the safe
+    /// per-kind default described by `Panel.sharesLatestSnapshotViaICloud`.
+    public var syncSnapshotToICloud: Bool?
+
     public init() {}
 
     private enum CodingKeys: String, CodingKey {
@@ -547,7 +579,7 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         case targetDate, text
         case tableHasHeader, tableZebra, tableStatusColoring
         case statusTargets, bridgeKey, mcp, connector
-        case accentColorHex, appearance, alertAbove, alertBelow
+        case accentColorHex, appearance, alertAbove, alertBelow, syncSnapshotToICloud
         case weatherLocationMode, weatherPlaceQuery, weatherStationID
         case weatherStationNetwork, weatherPersonalURL, weatherPersonalFormat
         case weatherPersonalPaths, weatherUnits
@@ -638,6 +670,8 @@ public struct PanelSettings: Codable, Hashable, Sendable {
             ?? PanelAppearance()
         alertAbove = try container.decodeIfPresent(Double.self, forKey: .alertAbove)
         alertBelow = try container.decodeIfPresent(Double.self, forKey: .alertBelow)
+        syncSnapshotToICloud = try container.decodeIfPresent(Bool.self,
+                                                             forKey: .syncSnapshotToICloud)
         weatherLocationMode = (try? container.decodeIfPresent(WeatherLocationMode.self,
                                                              forKey: .weatherLocationMode)) ?? .coordinates
         weatherPlaceQuery = try container.decodeIfPresent(String.self, forKey: .weatherPlaceQuery)

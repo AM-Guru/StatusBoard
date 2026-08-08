@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b0d11">
-  <meta name="description" content="Status Board is a free, open-source (MIT) self-hosted dashboard for Apple devices. Build live boards from 25 kinds of panel, web clips, your own scripts and the services you already use — then theme them and lay them out per device on Mac, iPhone, iPad, Apple TV and Apple Watch. No accounts, no tracking, no server.">
+  <meta name="description" content="Status Board is a free, open-source (MIT) self-hosted dashboard for Apple devices. Build live boards from 28 kinds of panel, web clips, your own scripts and the services you already use — then theme them and lay them out per device on Mac, iPhone, iPad, Apple TV and Apple Watch. No accounts, no tracking, no developer server.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://statusboard.am.guru/">
   <meta property="og:title" content="Status Board — a self-hosted dashboard for every screen you own">
@@ -69,8 +69,8 @@
       </div>
       <div class="hero-meta reveal" aria-label="At a glance">
         <span>macOS, iOS, iPadOS, tvOS, watchOS</span>
-        <span>25 panel kinds</span>
-        <span>9 themes</span>
+        <span>28 panel kinds</span>
+        <span>11 themes</span>
         <span>No account</span>
         <span>No tracking</span>
         <span>MIT licensed</span>
@@ -131,7 +131,7 @@
     <section id="panels">
       <div class="section-heading reveal">
         <span class="section-number">02 / PANELS</span>
-        <h2>Twenty-five kinds of panel, arranged how you like.</h2>
+        <h2>Twenty-eight kinds of panel, arranged how you like.</h2>
         <p>
           Drag panels onto a grid, size them, theme them, set a refresh interval, and give
           any numeric panel a threshold so it shouts when something crosses a line.
@@ -144,7 +144,8 @@
         <li>Table</li><li>Service Status</li><li>MCP Tool</li><li>Bridge Value</li>
         <li>GitHub</li><li>App Store Connect</li><li>Supabase</li><li>Web Logs</li>
         <li>Health</li><li>Tesla</li><li>Canvas</li><li>Class Schedule</li>
-        <li>Grades</li><li>Schedule</li><li>Assignments</li>
+        <li>Grades</li><li>Schedule</li><li>Assignments</li><li>HomeKit</li>
+        <li>Home Assistant</li><li>Nest Thermostat</li>
       </ul>
     </section>
 
@@ -154,7 +155,7 @@
         <span class="section-number">03 / APPEARANCE</span>
         <h2>A board you'd leave on the wall.</h2>
         <p>
-          Nine themes, procedural wallpapers and a backdrop that runs behind the whole
+          Eleven themes, procedural wallpapers and a backdrop that runs behind the whole
           board rather than repeating inside every panel — so one picture reads across
           the grid, with the gaps cut into it.
         </p>
@@ -162,8 +163,8 @@
       <div class="grid reveal">
         <div class="card">
           <div class="glyph" aria-hidden="true">◐</div>
-          <h3>Nine themes</h3>
-          <p>Status Board, Glass, Carbon, Slate, Paper, Terminal, Blueprint, Sunset and Aurora — or mix your own colours. Set one for the board and override it on any single panel.</p>
+          <h3>Eleven themes</h3>
+          <p>Status Board, Glass, Carbon, Slate, Paper, Terminal, Blueprint, Sunset, Aurora, Nocturne and Daybreak — or mix your own colours. Set one for the board and override it on any single panel.</p>
         </div>
         <div class="card teal">
           <div class="glyph" aria-hidden="true">▤</div>
@@ -214,8 +215,9 @@
         <span class="section-number">05 / CONNECTORS</span>
         <h2>Wired into what you already run.</h2>
         <p>
-          Every connector is configured by you, with your own credentials, kept in the
-          Keychain on your device. Your device talks to each service directly.
+          Every connector is configured by you. Device-only sign-ins use the Keychain;
+          panel connector settings follow your board in private iCloud. Your device talks
+          to each service directly.
         </p>
       </div>
       <div class="grid reveal">
@@ -294,8 +296,9 @@
       </div>
       <div class="grid reveal">
         <div class="card"><div class="glyph" aria-hidden="true">⊞</div><h3>A layout per device</h3><p>Move a panel on the TV without disturbing the Mac, or hide one on the phone entirely. Anything you don't override keeps following the shared board.</p></div>
-        <div class="card teal"><div class="glyph" aria-hidden="true">⤢</div><h3>Design for a screen you're not at</h3><p>The device simulator renders the board at another screen's real size, so you can lay out the Apple TV from your Mac and trust what you're seeing.</p></div>
-        <div class="card violet"><div class="glyph" aria-hidden="true">􀟜</div><h3>Widgets</h3><p>Home Screen, Lock Screen, Mac desktop and watch face — any panel, any size.</p></div>
+        <div class="card teal"><div class="glyph" aria-hidden="true">⤢</div><h3>Design for a screen you're not at</h3><p>The device simulator renders the board at another screen's real size; zoom from 50–300%, pan around it, and lay out the Apple TV from your Mac.</p></div>
+        <div class="card violet"><div class="glyph" aria-hidden="true">􀟜</div><h3>Widgets</h3><p>Home Screen, Lock Screen, Mac desktop and watch face — every panel, with its fixed theme or the source board's theme.</p></div>
+        <div class="card"><div class="glyph" aria-hidden="true">⛓</div><h3>One panel, several boards</h3><p>Share a panel across dashboards so its settings and data update everywhere, while each board keeps its own placement and can supply its own theme.</p></div>
         <div class="card"><div class="glyph" aria-hidden="true">⌚︎</div><h3>Apple Watch</h3><p>The board reflowed for a wrist: full-width where detail matters, paired up where it doesn't, on every watch size.</p></div>
         <div class="card teal"><div class="glyph" aria-hidden="true">📺</div><h3>Apple TV</h3><p>A wall-sized board that cycles through your dashboards on its own, laid out inside the title-safe area so overscan never eats a panel.</p></div>
         <div class="card violet"><div class="glyph" aria-hidden="true">◉</div><h3>Live Activities</h3><p>Pin a number you're watching right now to the Lock Screen and Dynamic Island.</p></div>
@@ -326,8 +329,8 @@
         <ul class="privacy-list">
           <li><span>Boards and cached values stay in the app's own container on your device</span></li>
           <li><span>iCloud sync uses CloudKit's <strong>private</strong> database — yours, not ours</span></li>
-          <li><span>Fetched values, Health data included, are never written to iCloud</span></li>
-          <li><span>Credentials and tokens live in the system Keychain</span></li>
+          <li><span>Calendar and HomeKit panel snapshots can cross devices in private iCloud; Health stays local unless you explicitly opt in for that panel</span></li>
+          <li><span>Device-only sign-ins use Keychain; connector settings sync only inside your private iCloud database</span></li>
           <li><span>Your device talks to each service directly; nothing is proxied</span></li>
           <li><span>Location is only read if you ask a weather panel to follow this device</span></li>
           <li><span>Bridge traffic never leaves your local network</span></li>
