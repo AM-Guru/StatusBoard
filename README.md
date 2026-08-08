@@ -265,11 +265,11 @@ cd Packages/StatusBoardKit && swift test
    Store distribution, open CloudKit Console for `iCloud.guru.am.statusboard`,
    confirm that type and field in Development, and choose **Deploy Schema
    Changes…**. TestFlight always uses Production.
-4. Release CI verifies `Dashboard.payload` in Production before uploading. Add
-   a CloudKit management token as the `CLOUDKIT_MANAGEMENT_TOKEN` environment
-   secret; otherwise the release intentionally stops before building a package
-   that cannot sync. Unsigned/entitlement-less local builds detect the situation
-   and simply run with sync off.
+4. When the `CLOUDKIT_MANAGEMENT_TOKEN` GitHub Actions secret is configured,
+   release CI verifies `Dashboard.payload` in Production before uploading and
+   stops if the schema is incomplete. Without the optional token it emits a
+   visible warning and continues the release. Unsigned/entitlement-less local
+   builds detect the situation and simply run with sync off.
 
 ## The Mac bridge
 

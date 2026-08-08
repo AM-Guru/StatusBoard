@@ -217,7 +217,7 @@ skipped, so it does not go unnoticed.
 | `ASC_PRIVATE_KEY` | Full contents of `AuthKey_<KEY_ID>.p8`, including the BEGIN/END lines |
 | `DEVELOPMENT_TEAM` | Your 10-character Apple team id |
 | `APP_STORE_INSTALLER_P12_BASE64` | Optional. Base64 of the `3rd Party Mac Developer Installer` `.p12`; unlocks the macOS leg. Uses `APP_STORE_DISTRIBUTION_P12_PASSWORD` — it is deliberately not a second password |
-| `CLOUDKIT_MANAGEMENT_TOKEN` | Management token from CloudKit Console Settings. `cktool` uses it to inspect the Production schema before release; it is never placed in the app. |
+| `CLOUDKIT_MANAGEMENT_TOKEN` | Optional but recommended. Management token from CloudKit Console Settings. `cktool` uses it to inspect the Production schema before release; it is never placed in the app. If absent, CI warns and continues. |
 
 ## CloudKit Production is a release prerequisite
 
@@ -239,10 +239,11 @@ Before the first TestFlight release, or after adding a CloudKit record/field:
    that token in the environment, or start the release workflow. Both inspect
    Production and fail if the required contract is missing.
 
-The release gate checks the server instead of relying on a remembered manual
-step. The app also reports missing `Dashboard.payload` explicitly; container,
-database, and signing errors have separate messages so they no longer all look
-like corrupt board data.
+With the token configured, the release gate checks the server instead of
+relying on a remembered manual step. Without it, CI warns but does not prevent
+the app from shipping. The app also reports missing `Dashboard.payload`
+explicitly; container, database, and signing errors have separate messages so
+they no longer all look like corrupt board data.
 
 The workflow writes the key to `~/.appstoreconnect/private_keys/` for the build
 and deletes it again in an `always()` step, so it never lingers on the runner.

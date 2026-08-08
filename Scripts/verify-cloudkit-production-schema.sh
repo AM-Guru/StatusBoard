@@ -7,7 +7,16 @@
 set -euo pipefail
 
 : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required}"
-: "${CLOUDKIT_MANAGEMENT_TOKEN:?CLOUDKIT_MANAGEMENT_TOKEN is required (create one in CloudKit Console Settings)}"
+
+# Schema inspection is a valuable release guard, but the management token is
+# not app-signing material and older repositories will not have one yet. Do not
+# turn that missing optional credential into a total release outage. Once the
+# secret is configured, an incomplete Production schema remains a hard failure.
+if [[ -z "${CLOUDKIT_MANAGEMENT_TOKEN:-}" ]]; then
+  echo "::warning title=CloudKit schema not verified::CLOUDKIT_MANAGEMENT_TOKEN is not configured; continuing without the Production schema preflight."
+  echo "  · Add the GitHub Actions secret after creating a management token in CloudKit Console Settings."
+  exit 0
+fi
 
 container_id="iCloud.guru.am.statusboard"
 schema_file="$(mktemp /tmp/statusboard-production-schema.XXXXXX.ckdb)"
