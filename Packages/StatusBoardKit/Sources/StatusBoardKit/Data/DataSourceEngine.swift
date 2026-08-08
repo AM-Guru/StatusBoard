@@ -105,6 +105,18 @@ public final class DataSourceEngine {
         let snapshot = await fetch(panel: panel)
         guard !Task.isCancelled else { return true }
         guard let snapshot else { return true }
+        #if os(tvOS)
+        // A Mac bridge relays every snapshot it owns, not just Calendar. If a
+        // tvOS API cannot fetch the same source locally, keep that usable relay
+        // instead of replacing it with the platform-unavailable error on the
+        // next refresh. Network-backed sources still replace stale data when
+        // they recover successfully.
+        if snapshot.isError,
+           let existing = snapshots.record(for: panel.snapshotKey),
+           !existing.snapshot.isError {
+            return true
+        }
+        #endif
         snapshots.set(snapshot, for: panel.snapshotKey)
         if case .error = snapshot { return false }
         return true

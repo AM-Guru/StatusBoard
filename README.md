@@ -21,12 +21,12 @@ the developer has no way to see your data.
 
 | Panel | What it shows |
 |---|---|
-| Clock | Big LCD-style clock, any time zone |
-| Weather | Current conditions + 5-day forecast (Open-Meteo, no API key) |
+| Clock | LCD, analog, 24-hour, Solar Dial, and other faces; analog seconds can be hidden and Solar Dial can add hour/minute/second hands |
+| Weather | Current Location by default, current conditions + 5-day forecast, with automatic or forced across/down day layouts |
 | Graph | 12 chart styles — line, smooth, area, bars, lollipop, strip, delta, threshold, peak, radial, waveform, matrix heatmap — from a JSON URL **or** live bridge data |
 | Progress | 0–100% in 7 formats: bar, ring, watch dial, dots, stack, matrix, gradient |
 | RSS Feed | Headlines from any RSS/Atom feed — list or big rotating **ticker** |
-| Calendar | Upcoming events from the system calendar; the latest event feed syncs through private iCloud for Apple TV |
+| Calendar | Upcoming events from the calendars you select; the latest filtered feed syncs through private iCloud and the Mac bridge for Apple TV |
 | Web Clip | A live web page, or **just a region of one** (see below); the Mac bridge renders and crops it for Apple TV |
 | Image | A fetched image with optional Core Image filter chains (`sepia:70,blur:20`, pixelate, grayscale, invert) |
 | Table | JSON/CSV tables with zebra striping and semantic status coloring (`success`/`degraded`/`failed`/`building`…) |
@@ -86,6 +86,9 @@ the developer has no way to see your data.
   and scrolls instead of shrinking every panel into an unreadable strip. The
   Apple TV is the exception — nobody scrolls from the sofa, so its board always
   fits the screen exactly.
+- **Fine vertical sizing** — each screen layout can resize in full-, half-, or
+  quarter-row steps. Changing precision rescales existing frames so nothing
+  jumps or changes size, and display mode still ends at the last occupied row.
 - **Screen menu** on Mac, iPad and iPhone (toolbar dropdown beside Edit) — pick
   This Mac, iPad, iPhone, Apple TV, Apple Watch or a linked pair of **Smart
   Glasses** and the whole window becomes
@@ -161,6 +164,10 @@ the developer has no way to see your data.
   automation (no bridge needed; numeric pushes build chartable history), and
   "Get Status Board Value" reads panel values for use in automations. Values
   pushed while the app is closed spool and appear on widgets immediately.
+- **Integrated integration guide** — the book button opens searchable setup and
+  platform documentation for every data source, including Apple TV delivery,
+  terminal input, App Intents, Siri, and WidgetKit support. It is generated from
+  an exhaustive code catalog, so new panel kinds cannot compile without docs.
 - **Share as image** — export any board as a rendered 1080p poster from the
   Share menu, alongside JSON export.
 - **Live Activities** — pin any numeric panel to the iPhone Dynamic Island and
@@ -207,7 +214,8 @@ the developer has no way to see your data.
 - **MCP client**: panels can call tools on MCP servers over streamable HTTP
   (all platforms) or stdio (macOS spawns the server process).
 - **Widgets**: a configurable WidgetKit widget (iOS + macOS) shows any panel's
-  latest data on your Home Screen / desktop.
+  latest data on your Home Screen / desktop, including Extra Large on supported
+  iPad and Mac surfaces.
 
 ## Repository layout
 

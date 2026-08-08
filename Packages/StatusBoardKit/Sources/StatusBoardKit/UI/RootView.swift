@@ -46,6 +46,7 @@ struct SplitRootView: View {
     @Bindable var model: AppModel
     @State private var renamingBoard: Dashboard?
     @State private var showsBoardAppearance = false
+    @State private var showsIntegrations = false
     @State private var renameText = ""
 
     var body: some View {
@@ -67,6 +68,9 @@ struct SplitRootView: View {
             if let board = model.store.selectedDashboard {
                 BoardAppearanceView(model: model, dashboardID: board.id)
             }
+        }
+        .sheet(isPresented: $showsIntegrations) {
+            IntegrationGuideView()
         }
         .alert("Rename Dashboard", isPresented: Binding(
             get: { renamingBoard != nil },
@@ -267,6 +271,14 @@ struct SplitRootView: View {
         }
         ToolbarItem(placement: .automatic) {
             BridgeStatusLabel(model: model)
+        }
+        ToolbarItem(placement: .automatic) {
+            Button {
+                showsIntegrations = true
+            } label: {
+                Label("Integrations", systemImage: "book.pages")
+            }
+            .help("Data sources, setup, automation, Siri, and WidgetKit support")
         }
     }
 

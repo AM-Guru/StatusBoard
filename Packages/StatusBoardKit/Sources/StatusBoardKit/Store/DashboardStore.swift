@@ -517,6 +517,14 @@ public final class DashboardStore {
         update(board, undoActionName: "Resize \(device.displayName) Grid")
     }
 
+    public func setVerticalSubdivisions(_ subdivisions: Int,
+                                        in dashboardID: Dashboard.ID,
+                                        on device: SBDeviceClass) {
+        guard var board = dashboard(id: dashboardID) else { return }
+        board.setVerticalSubdivisions(subdivisions, on: device)
+        update(board, undoActionName: "Change \(device.displayName) Vertical Sizing")
+    }
+
     public func beginCustomLayout(in dashboardID: Dashboard.ID, on device: SBDeviceClass) {
         guard var board = dashboard(id: dashboardID),
               !board.hasCustomLayout(for: device) else { return }

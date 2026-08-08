@@ -531,7 +531,11 @@ public struct SBBoardCanvas: Equatable, Sendable {
         // A row is never drawn shorter than the screen can read. When the board
         // has more rows than that allows, it grows past the bottom of the screen
         // and scrolls instead of squeezing every panel into an unreadable sliver.
-        let readable = max(fitted, device.minimumRowHeight)
+        // Fine vertical grids divide a traditional row into smaller placement
+        // units. Divide the readability floor by the same amount so switching
+        // precision preserves panel size instead of making every panel taller.
+        let readable = max(fitted, device.minimumRowHeight
+            / CGFloat(max(1, grid.verticalSubdivisions)))
         rowHeight = device.allowsScrolling
             ? readable * min(2, max(0.75, contentScale))
             : fitted
@@ -704,6 +708,32 @@ extension Dashboard {
     public mutating func setGrid(_ newGrid: BoardGrid, on device: SBDeviceClass) {
         beginCustomLayout(for: device)
         deviceLayouts[device.rawValue]?.grid = newGrid
+    }
+
+    /// Changes vertical resize precision while leaving every panel at the same
+    /// visual position and height. Reducing precision rounds to the nearest
+    /// representable unit and keeps every panel at least one unit tall.
+    public mutating func setVerticalSubdivisions(_ requested: Int,
+                                                 on device: SBDeviceClass) {
+        beginCustomLayout(for: device)
+        guard var layout = deviceLayouts[device.rawValue], var layoutGrid = layout.grid else {
+            return
+        }
+        let target = BoardGrid.validSubdivisions(requested)
+        let source = max(1, layoutGrid.verticalSubdivisions)
+        guard target != source else { return }
+        let ratio = Double(target) / Double(source)
+        layoutGrid.rows = max(1, Int((Double(layoutGrid.rows) * ratio).rounded()))
+        layoutGrid.verticalSubdivisions = target
+        layout.grid = layoutGrid
+        layout.frames = layout.frames.mapValues { frame in
+            let top = max(0, Int((Double(frame.y) * ratio).rounded()))
+            let bottom = max(top + 1,
+                             Int((Double(frame.y + frame.height) * ratio).rounded()))
+            return GridRect(x: frame.x, y: top, width: frame.width,
+                            height: bottom - top)
+        }
+        deviceLayouts[device.rawValue] = layout
     }
 
     /// Drops a device's overrides; it goes back to arranging itself, or to

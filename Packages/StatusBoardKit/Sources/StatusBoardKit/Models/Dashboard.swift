@@ -215,10 +215,31 @@ public struct Dashboard: Identifiable, Codable, Hashable, Sendable {
 public struct BoardGrid: Codable, Hashable, Sendable {
     public var columns: Int
     public var rows: Int
+    /// Number of vertical placement units in one traditional grid row. A
+    /// value of two or four gives the editor half- or quarter-row resize
+    /// steps without changing the physical size of an existing layout.
+    public var verticalSubdivisions: Int
 
-    public init(columns: Int = 8, rows: Int = 4) {
+    public init(columns: Int = 8, rows: Int = 4, verticalSubdivisions: Int = 1) {
         self.columns = columns
         self.rows = rows
+        self.verticalSubdivisions = Self.validSubdivisions(verticalSubdivisions)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case columns, rows, verticalSubdivisions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        columns = max(1, try container.decode(Int.self, forKey: .columns))
+        rows = max(1, try container.decode(Int.self, forKey: .rows))
+        verticalSubdivisions = Self.validSubdivisions(
+            try container.decodeIfPresent(Int.self, forKey: .verticalSubdivisions) ?? 1)
+    }
+
+    public static func validSubdivisions(_ value: Int) -> Int {
+        [1, 2, 4].contains(value) ? value : 1
     }
 }
 

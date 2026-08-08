@@ -372,10 +372,18 @@ public struct DeviceLayoutEditorView: View {
         return VStack(alignment: .leading, spacing: 8) {
             sectionTitle("Grid")
             Stepper("Columns: \(grid.columns)") { step(columns: 1) } onDecrement: { step(columns: -1) }
-            Stepper("Rows: \(grid.rows)") { step(rows: 1) } onDecrement: { step(rows: -1) }
+            Stepper("Vertical units: \(grid.rows)") { step(rows: 1) } onDecrement: { step(rows: -1) }
+            Picker("Vertical sizing", selection: Binding(
+                get: { grid.verticalSubdivisions },
+                set: { model.store.setVerticalSubdivisions($0, in: dashboardID, on: device) })) {
+                Text("Full rows").tag(1)
+                Text("Half rows").tag(2)
+                Text("Quarter rows").tag(4)
+            }
+            .pickerStyle(.segmented)
             Text(device.allowsScrolling
-                 ? "Panels stretch to fill the grid, so fewer rows means bigger panels. Add more rows than fit the screen and the board scrolls instead of shrinking them."
-                 : "Panels stretch to fill the grid, so fewer rows means bigger panels. Everything has to fit the screen — there is nothing to scroll \(device == .glasses ? "on a pair of lenses" : "with from the sofa").")
+                 ? "Use half- or quarter-row sizing for smaller height adjustments. Existing panels keep their size. Add more vertical units than fit and the board scrolls instead of squeezing them."
+                 : "Use half- or quarter-row sizing for smaller height adjustments. Existing panels keep their size, and everything remains fitted to this non-scrolling screen.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

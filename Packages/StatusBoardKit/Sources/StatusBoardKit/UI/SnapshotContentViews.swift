@@ -503,16 +503,18 @@ struct WeatherContentView: View {
     }
 
     var body: some View {
-        // A wide panel gets the days down the right-hand side, where they can
-        // be bigger than a strip squeezed underneath. Both axes are checked, so
-        // a side-by-side is only taken when the panel really has the width for
-        // it; anything narrower falls through to the stacked layouts, whose own
-        // choice is a vertical one exactly as it was before.
-        ViewThatFits(in: [.horizontal, .vertical]) {
-            splitLayout(.large)
-            splitLayout(.medium)
-            splitLayout(.small)
-            stackedLayouts
+        GeometryReader { proxy in
+            let layout = settings.weatherForecastLayout.resolved(
+                width: Double(proxy.size.width), height: Double(proxy.size.height))
+            Group {
+                switch layout {
+                case .horizontal, .automatic:
+                    stackedLayouts
+                case .vertical:
+                    verticalLayouts
+                }
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
         }
         .padding(10)
     }
@@ -523,6 +525,25 @@ struct WeatherContentView: View {
             layout(.medium)
             layout(.small)
             compactLayout
+        }
+    }
+
+    private var verticalLayouts: some View {
+        ViewThatFits(in: [.horizontal, .vertical]) {
+            verticalLayout(.large)
+            verticalLayout(.medium)
+            verticalLayout(.small)
+            compactLayout
+        }
+    }
+
+    /// Conditions above a one-day-per-row forecast. It reads naturally in a
+    /// tall panel and avoids making five narrow columns compete for width.
+    private func verticalLayout(_ metrics: WeatherMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.rowSpacing) {
+            nowBlock(metrics, symbol: metrics.nowSymbol,
+                     temperature: metrics.nowTemperature)
+            if !report.days.isEmpty { dayList(metrics) }
         }
     }
 
@@ -545,21 +566,6 @@ struct WeatherContentView: View {
             nowBlock(metrics, symbol: metrics.nowSymbol, temperature: metrics.nowTemperature)
             if !report.days.isEmpty {
                 dayStrip(metrics)
-            }
-        }
-    }
-
-    /// Conditions on the left, the five days listed down the right. Only ever
-    /// chosen when the panel is wide enough to hold both.
-    private func splitLayout(_ metrics: WeatherMetrics) -> some View {
-        HStack(spacing: 16) {
-            nowBlock(metrics, symbol: metrics.wideNowSymbol,
-                     temperature: metrics.wideNowTemperature)
-            // Wide enough for the two blocks to sit apart, not merely wide
-            // enough for them both to exist — below that, stacking reads better.
-            Spacer(minLength: 28)
-            if !report.days.isEmpty {
-                dayList(metrics)
             }
         }
     }
@@ -691,13 +697,9 @@ struct WeatherContentView: View {
 /// panel can actually hold. `.small` is the size the panel drew at before this
 /// existed, so nothing that fit then stops fitting now.
 ///
-/// The `wide` sizes are for the side-by-side layout, where the conditions have
-/// a column to themselves and can afford to be larger.
 struct WeatherMetrics {
     var nowSymbol: CGFloat
     var nowTemperature: CGFloat
-    var wideNowSymbol: CGFloat
-    var wideNowTemperature: CGFloat
     var condition: CGFloat
     var detail: CGFloat
     var rowSpacing: CGFloat
@@ -711,19 +713,19 @@ struct WeatherMetrics {
     var rowGap: CGFloat
 
     static let large = WeatherMetrics(
-        nowSymbol: 40, nowTemperature: 40, wideNowSymbol: 52, wideNowTemperature: 52,
+        nowSymbol: 40, nowTemperature: 40,
         condition: 15, detail: 13, rowSpacing: 10,
         dayLabel: 13, daySymbol: 24, dayHigh: 20, dayLow: 17, daySpacing: 4,
         dayPadding: 9, rowGap: 6)
 
     static let medium = WeatherMetrics(
-        nowSymbol: 34, nowTemperature: 34, wideNowSymbol: 42, wideNowTemperature: 42,
+        nowSymbol: 34, nowTemperature: 34,
         condition: 13, detail: 11, rowSpacing: 8,
         dayLabel: 11, daySymbol: 18, dayHigh: 16, dayLow: 14, daySpacing: 3,
         dayPadding: 7, rowGap: 4)
 
     static let small = WeatherMetrics(
-        nowSymbol: 30, nowTemperature: 30, wideNowSymbol: 32, wideNowTemperature: 32,
+        nowSymbol: 30, nowTemperature: 30,
         condition: 12, detail: 10, rowSpacing: 2,
         dayLabel: 9, daySymbol: 13, dayHigh: 12, dayLow: 11, daySpacing: 2,
         dayPadding: 2, rowGap: 2)

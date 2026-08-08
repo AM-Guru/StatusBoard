@@ -481,6 +481,25 @@ struct SolarDialClockFace: View {
             }
         }
 
+        if settings.showsClockHands {
+            let angles = ClockAngles(date: date, timeZone: settings.clockTimeZone)
+            clockHand(in: &context, center: center, radius: radius * 0.42,
+                      turns: angles.hourTurns, width: max(2.5, radius * 0.035),
+                      color: sbStyle.textPrimary)
+            clockHand(in: &context, center: center, radius: radius * 0.62,
+                      turns: angles.minuteTurns, width: max(2, radius * 0.025),
+                      color: sbStyle.textPrimary)
+            if settings.showsSeconds {
+                clockHand(in: &context, center: center, radius: radius * 0.72,
+                          turns: angles.secondTurns, width: max(1, radius * 0.012),
+                          color: accent, tail: radius * 0.12)
+            }
+            let pin = max(2, radius * 0.035)
+            context.fill(Path(ellipseIn: CGRect(x: center.x - pin, y: center.y - pin,
+                                                width: pin * 2, height: pin * 2)),
+                         with: .color(accent))
+        }
+
         // Where the sun is now.
         let nowTurns = dayTurns(hours: ClockAngles(date: date,
                                                    timeZone: settings.clockTimeZone).dayTurns * 24)
@@ -513,6 +532,17 @@ struct SolarDialClockFace: View {
         calendar.timeZone = settings.clockTimeZone
         let parts = calendar.dateComponents([.hour, .minute], from: date)
         return Double(parts.hour ?? 0) + Double(parts.minute ?? 0) / 60
+    }
+
+    private func clockHand(in context: inout GraphicsContext, center: CGPoint,
+                           radius: CGFloat, turns: Double, width: CGFloat,
+                           color: Color, tail: CGFloat = 0) {
+        let path = Path { path in
+            path.move(to: point(center: center, radius: -tail, turns: turns))
+            path.addLine(to: point(center: center, radius: radius, turns: turns))
+        }
+        context.stroke(path, with: .color(color),
+                       style: StrokeStyle(lineWidth: width, lineCap: .round))
     }
 }
 

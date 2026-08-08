@@ -345,13 +345,13 @@ struct StatusBoardPanelWidget: Widget {
         .configurationDisplayName("Status Board Panel")
         .description("Shows live data from one of your Status Board panels.")
         #if os(iOS)
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge,
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge,
                             .accessoryInline, .accessoryCircular, .accessoryRectangular])
         #elseif os(watchOS)
         .supportedFamilies([.accessoryInline, .accessoryCircular,
                             .accessoryRectangular, .accessoryCorner])
         #else
-        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .systemExtraLarge])
         #endif
     }
 }

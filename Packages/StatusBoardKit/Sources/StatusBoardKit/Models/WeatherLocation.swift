@@ -149,6 +149,32 @@ public enum WeatherUnits: String, Codable, CaseIterable, Sendable, Identifiable 
     }
 }
 
+/// How forecast days are arranged inside a weather panel.
+public enum WeatherForecastLayout: String, Codable, CaseIterable, Sendable, Identifiable {
+    case automatic
+    /// Days run left to right, best for wide and short panels.
+    case horizontal
+    /// One day per row, best for tall or narrow panels.
+    case vertical
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .automatic: return "Automatic"
+        case .horizontal: return "Across"
+        case .vertical: return "Down"
+        }
+    }
+
+    /// Resolves the automatic choice without SwiftUI so it is testable and is
+    /// shared by the app, WidgetKit, and every target shape.
+    public func resolved(width: Double, height: Double) -> WeatherForecastLayout {
+        guard self == .automatic else { return self }
+        return width >= height ? .horizontal : .vertical
+    }
+}
+
 /// One candidate answer to a place search, offered to the user to pick from.
 public struct GeocodedPlace: Codable, Hashable, Sendable, Identifiable {
     public var id: String { "\(name)|\(latitude),\(longitude)" }

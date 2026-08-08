@@ -390,6 +390,9 @@ public struct PanelSettings: Codable, Hashable, Sendable {
     /// The coordinates come from the shared `latitude` / `longitude` fields, so
     /// a clock and a weather panel pick their place the same way.
     public var showsSunPosition: Bool = true
+    /// Traditional hour/minute hands over the Solar Dial. Its second hand is
+    /// controlled by `showsSeconds`, just like the analog face.
+    public var showsClockHands: Bool = false
 
     // Weather
     /// Resolved coordinates. Always filled in for a working panel, whatever
@@ -401,7 +404,7 @@ public struct PanelSettings: Codable, Hashable, Sendable {
     public var longitude: Double?
     public var locationName: String?
     /// How the location above was chosen.
-    public var weatherLocationMode: WeatherLocationMode = .coordinates
+    public var weatherLocationMode: WeatherLocationMode = .current
     /// A city, postal code or street address, for `.place`.
     public var weatherPlaceQuery: String?
     /// Observation station identifier, for `.station` (e.g. "KSFO").
@@ -413,9 +416,15 @@ public struct PanelSettings: Codable, Hashable, Sendable {
     /// Dot paths into a custom PWS payload, keyed by `PersonalWeatherField`.
     public var weatherPersonalPaths: [String: String] = [:]
     public var weatherUnits: WeatherUnits = .automatic
+    public var weatherForecastLayout: WeatherForecastLayout = .automatic
 
     // Calendar
     public var calendarDaysAhead: Int = 7
+    /// Empty means all calendars. Names accompany EventKit identifiers so a
+    /// selection can be matched after syncing to a different device, where
+    /// identifiers are not guaranteed to be identical.
+    public var calendarIdentifiers: Set<String> = []
+    public var calendarNames: Set<String> = []
 
     // Health
     public var healthMetric: HealthMetric = .steps
@@ -569,9 +578,10 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         case webClipAutoLogin
         case imageFilter
         case timeZoneID, showsSeconds, clockStyle, clockHourFormat
-        case showsClockDate, showsSunPosition
+        case showsClockDate, showsSunPosition, showsClockHands
         case latitude, longitude, locationName
-        case calendarDaysAhead, listDisplay, healthMetric, courseAliases, hiddenCourses
+        case calendarDaysAhead, calendarIdentifiers, calendarNames
+        case listDisplay, healthMetric, courseAliases, hiddenCourses
         case feedSources, feedShowsSourceIcons, feedShowsSourceNames
         case tessieParkedFields, tessieDrivingFields, tessieAutoContext, tessieContext
         case homeMode, homeName, homeTarget, homeRooms, homeSensorKinds
@@ -582,7 +592,7 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         case accentColorHex, appearance, alertAbove, alertBelow, syncSnapshotToICloud
         case weatherLocationMode, weatherPlaceQuery, weatherStationID
         case weatherStationNetwork, weatherPersonalURL, weatherPersonalFormat
-        case weatherPersonalPaths, weatherUnits
+        case weatherPersonalPaths, weatherUnits, weatherForecastLayout
     }
 
     public init(from decoder: Decoder) throws {
@@ -619,10 +629,15 @@ public struct PanelSettings: Codable, Hashable, Sendable {
             .flatMap { $0 } ?? .twentyFour
         showsClockDate = try container.decodeIfPresent(Bool.self, forKey: .showsClockDate) ?? true
         showsSunPosition = try container.decodeIfPresent(Bool.self, forKey: .showsSunPosition) ?? true
+        showsClockHands = try container.decodeIfPresent(Bool.self, forKey: .showsClockHands) ?? false
         latitude = try container.decodeIfPresent(Double.self, forKey: .latitude)
         longitude = try container.decodeIfPresent(Double.self, forKey: .longitude)
         locationName = try container.decodeIfPresent(String.self, forKey: .locationName)
         calendarDaysAhead = try container.decodeIfPresent(Int.self, forKey: .calendarDaysAhead) ?? 7
+        calendarIdentifiers = try container.decodeIfPresent(Set<String>.self,
+                                                             forKey: .calendarIdentifiers) ?? []
+        calendarNames = try container.decodeIfPresent(Set<String>.self,
+                                                       forKey: .calendarNames) ?? []
         healthMetric = (try? container.decodeIfPresent(HealthMetric.self, forKey: .healthMetric)) ?? .steps
         courseAliases = try container.decodeIfPresent([String: String].self, forKey: .courseAliases) ?? [:]
         hiddenCourses = try container.decodeIfPresent(Set<String>.self, forKey: .hiddenCourses) ?? []
@@ -673,7 +688,8 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         syncSnapshotToICloud = try container.decodeIfPresent(Bool.self,
                                                              forKey: .syncSnapshotToICloud)
         weatherLocationMode = (try? container.decodeIfPresent(WeatherLocationMode.self,
-                                                             forKey: .weatherLocationMode)) ?? .coordinates
+                                                             forKey: .weatherLocationMode))
+            .flatMap { $0 } ?? ((latitude != nil && longitude != nil) ? .coordinates : .current)
         weatherPlaceQuery = try container.decodeIfPresent(String.self, forKey: .weatherPlaceQuery)
         weatherStationID = try container.decodeIfPresent(String.self, forKey: .weatherStationID)
         weatherStationNetwork = (try? container.decodeIfPresent(WeatherStationNetwork.self,
@@ -684,6 +700,9 @@ public struct PanelSettings: Codable, Hashable, Sendable {
         weatherPersonalPaths = try container.decodeIfPresent([String: String].self,
                                                              forKey: .weatherPersonalPaths) ?? [:]
         weatherUnits = (try? container.decodeIfPresent(WeatherUnits.self, forKey: .weatherUnits)) ?? .automatic
+        weatherForecastLayout = (try? container.decodeIfPresent(WeatherForecastLayout.self,
+                                                                 forKey: .weatherForecastLayout))
+            .flatMap { $0 } ?? .automatic
     }
 }
 

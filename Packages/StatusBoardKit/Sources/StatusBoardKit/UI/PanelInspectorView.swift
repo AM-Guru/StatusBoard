@@ -17,6 +17,8 @@ public struct PanelInspectorView: View {
     @State private var tessieVehicles: [TessieSource.VehicleSummary] = []
     @State private var tessieLookupError: String?
     @State private var isLoadingTessieVehicles = false
+    @State private var calendarChoices: [CalendarChoice] = []
+    @State private var calendarLookupError: String?
     @Environment(\.dismiss) private var dismiss
 
     @MainActor
@@ -93,6 +95,7 @@ public struct PanelInspectorView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         normalizeFeedSettings()
+                        normalizeCalendarSettings()
                         model.store.updatePanel(draft, in: dashboardID)
                         shareCanvasCredentials()
                         shareTessieCredentials()
@@ -122,6 +125,15 @@ public struct PanelInspectorView: View {
                 if !url.isEmpty { draft.settings.url = url }
             }
         }
+        .task(id: draft.kind) {
+            guard draft.kind == .calendar else { return }
+            do {
+                calendarChoices = try await CalendarSource.availableCalendars()
+                calendarLookupError = nil
+            } catch {
+                calendarLookupError = error.localizedDescription
+            }
+        }
     }
 
     @ViewBuilder
@@ -132,6 +144,17 @@ public struct PanelInspectorView: View {
 
         case .weather:
             WeatherLocationSection(settings: $draft.settings)
+            Section("Forecast") {
+                Picker("Day layout", selection: $draft.settings.weatherForecastLayout) {
+                    ForEach(WeatherForecastLayout.allCases) { layout in
+                        Text(layout.displayName).tag(layout)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("Automatic places days across wide panels and down tall or narrow panels. The choice also applies to WidgetKit sizes.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
         case .countdown:
             Section("Countdown") {
@@ -167,19 +190,7 @@ public struct PanelInspectorView: View {
             }
 
         case .calendar:
-            Section("Calendar") {
-                Stepper("Next \(draft.settings.calendarDaysAhead) days",
-                        value: $draft.settings.calendarDaysAhead, in: 1...60)
-                Picker("Display", selection: $draft.settings.listDisplay) {
-                    ForEach(ListDisplayMode.allCases, id: \.self) { mode in
-                        Text(mode.displayName).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Text("Events come from this device's calendars. Apple TV can't access calendars.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+            calendarSection
 
         case .webClip:
             Section("Web Clip") {
@@ -376,6 +387,74 @@ public struct PanelInspectorView: View {
         }
     }
 
+    // MARK: - Calendar
+
+    private var calendarSection: some View {
+        Section("Calendar") {
+            Stepper("Next \(draft.settings.calendarDaysAhead) days",
+                    value: $draft.settings.calendarDaysAhead, in: 1...60)
+            Picker("Display", selection: $draft.settings.listDisplay) {
+                ForEach(ListDisplayMode.allCases, id: \.self) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            if calendarChoices.isEmpty, calendarLookupError == nil {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Loading calendars…").foregroundStyle(.secondary)
+                }
+            }
+            ForEach(calendarChoices) { choice in
+                Toggle(isOn: calendarBinding(choice)) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(choice.title)
+                        Text(choice.source).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if !draft.settings.calendarIdentifiers.isEmpty
+                || !draft.settings.calendarNames.isEmpty {
+                Button("Show All Calendars") {
+                    draft.settings.calendarIdentifiers.removeAll()
+                    draft.settings.calendarNames.removeAll()
+                }
+            }
+            if let calendarLookupError {
+                Label(calendarLookupError, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(SBTheme.bad)
+            }
+            Text("Empty selections mean all calendars. Names are saved beside system identifiers so the selection can follow the board to another Apple device. Apple TV displays the latest private iCloud snapshot or the live snapshot relayed by the Mac bridge.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func calendarBinding(_ choice: CalendarChoice) -> Binding<Bool> {
+        Binding {
+            let settings = draft.settings
+            return (settings.calendarIdentifiers.isEmpty && settings.calendarNames.isEmpty)
+                || settings.calendarIdentifiers.contains(choice.id)
+                || settings.calendarNames.contains(choice.matchName)
+        } set: { selected in
+            // The first deselection turns implicit "all" into an explicit set,
+            // then removes just the calendar the user switched off.
+            if draft.settings.calendarIdentifiers.isEmpty && draft.settings.calendarNames.isEmpty {
+                draft.settings.calendarIdentifiers = Set(calendarChoices.map(\.id))
+                draft.settings.calendarNames = Set(calendarChoices.map(\.matchName))
+            }
+            if selected {
+                draft.settings.calendarIdentifiers.insert(choice.id)
+                draft.settings.calendarNames.insert(choice.matchName)
+            } else {
+                draft.settings.calendarIdentifiers.remove(choice.id)
+                draft.settings.calendarNames.remove(choice.matchName)
+            }
+        }
+    }
+
     // MARK: - Clock
 
     /// The face, then the options that face actually uses. Sun faces need a
@@ -409,6 +488,16 @@ public struct PanelInspectorView: View {
                       text: optionalString($draft.settings.timeZoneID))
             if style.supportsSeconds {
                 Toggle("Show seconds", isOn: $draft.settings.showsSeconds)
+            }
+            if style == .solar {
+                Toggle("Show clock hands", isOn: $draft.settings.showsClockHands)
+                if draft.settings.showsClockHands {
+                    Text(draft.settings.showsSeconds
+                         ? "Hour, minute, and second hands are shown."
+                         : "Hour and minute hands are shown.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             if style != .sunTimes && style != .sunArc {
                 Toggle("Show date", isOn: $draft.settings.showsClockDate)
@@ -511,6 +600,15 @@ public struct PanelInspectorView: View {
         sources.removeAll { $0.url.isEmpty }
         draft.settings.feedSources = sources
         draft.settings.url = sources.first(where: \.isEnabled)?.url ?? sources.first?.url
+    }
+
+    private func normalizeCalendarSettings() {
+        guard draft.kind == .calendar, !calendarChoices.isEmpty else { return }
+        let everyID = Set(calendarChoices.map(\.id))
+        if draft.settings.calendarIdentifiers.isSuperset(of: everyID) {
+            draft.settings.calendarIdentifiers.removeAll()
+            draft.settings.calendarNames.removeAll()
+        }
     }
 
     private func feedRowLabel(_ source: FeedSource) -> String {

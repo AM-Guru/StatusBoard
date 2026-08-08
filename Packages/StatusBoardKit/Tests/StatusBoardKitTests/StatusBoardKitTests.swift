@@ -3348,6 +3348,8 @@ struct SessionCookieJarTests {
 @Suite struct WeatherLocationTests {
     @Test func summariesDescribeEachMode() {
         var settings = PanelSettings()
+        #expect(settings.weatherLocationMode == .current)
+        settings.weatherLocationMode = .coordinates
         settings.latitude = 42.44
         settings.longitude = -76.5
         #expect(settings.weatherLocationSummary.contains("42.44"))
@@ -3386,6 +3388,68 @@ struct SessionCookieJarTests {
         #expect(place?.name == "Ithaca")
         #expect(place?.detail == "New York, United States")
         #expect(place?.latitude == 42.44)
+    }
+}
+
+@Suite struct IntegrationAndFineLayoutTests {
+    @Test func legacyGridDecodesAtFullRowPrecision() throws {
+        let grid = try JSONDecoder().decode(BoardGrid.self,
+            from: Data(#"{"columns":8,"rows":4}"#.utf8))
+        #expect(grid.verticalSubdivisions == 1)
+    }
+
+    @Test func changingVerticalPrecisionPreservesPanelGeometry() {
+        let panel = Panel(kind: .weather, title: "Weather",
+                          frame: GridRect(x: 1, y: 1, width: 3, height: 2))
+        var board = Dashboard(name: "Fine", grid: BoardGrid(columns: 8, rows: 4),
+                              panels: [panel])
+        board.setVerticalSubdivisions(4, on: .mac)
+        let grid = board.grid(for: .mac)
+        let frame = board.frame(for: panel, device: .mac)
+        #expect(grid.rows == 16)
+        #expect(grid.verticalSubdivisions == 4)
+        #expect(frame.y == 4)
+        #expect(frame.height == 8)
+
+        let original = SBBoardCanvas(screenHeight: 800, spacing: 10,
+            grid: BoardGrid(columns: 8, rows: 4), panels: [panel], device: .mac,
+            isEditing: true)
+        var placed = panel
+        placed.frame = frame
+        let precise = SBBoardCanvas(screenHeight: 800, spacing: 10,
+            grid: grid, panels: [placed], device: .mac, isEditing: true)
+        #expect(abs(original.rowHeight * 2 - precise.rowHeight * 8) < 0.01)
+    }
+
+    @Test func weatherForecastDirectionAdaptsAndCanBeOverridden() {
+        #expect(WeatherForecastLayout.automatic.resolved(width: 400, height: 160) == .horizontal)
+        #expect(WeatherForecastLayout.automatic.resolved(width: 160, height: 400) == .vertical)
+        #expect(WeatherForecastLayout.vertical.resolved(width: 500, height: 100) == .vertical)
+    }
+
+    @Test func newLocationDependentSettingsStartAtCurrentLocation() {
+        #expect(PanelSettings().weatherLocationMode == .current)
+    }
+
+    @Test func integrationCatalogCoversEveryPanelAndWidgetKit() {
+        #expect(Set(IntegrationCatalog.all.map(\.kind)) == Set(PanelKind.allCases))
+        #expect(!IntegrationCatalog.all.contains { !$0.supportsWidgetKit })
+        #expect(IntegrationCatalog.descriptor(for: .bridge).acceptsTerminalInput)
+        #expect(!IntegrationCatalog.descriptor(for: .calendar).acceptsTerminalInput)
+    }
+
+    @Test func newSettingsRoundTripCalendarWeatherAndClockOptions() throws {
+        var settings = PanelSettings()
+        settings.calendarIdentifiers = ["calendar-1"]
+        settings.calendarNames = ["iCloud/Family"]
+        settings.weatherForecastLayout = .vertical
+        settings.showsClockHands = true
+        let decoded = try JSONDecoder().decode(PanelSettings.self,
+            from: JSONEncoder().encode(settings))
+        #expect(decoded.calendarIdentifiers == ["calendar-1"])
+        #expect(decoded.calendarNames == ["iCloud/Family"])
+        #expect(decoded.weatherForecastLayout == .vertical)
+        #expect(decoded.showsClockHands)
     }
 }
 
