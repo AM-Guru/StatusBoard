@@ -47,12 +47,37 @@ public final class DataSourceEngine {
         fingerprints.removeAll()
     }
 
+    /// How long to wait before trying again after a fetch that came back with
+    /// an error, in place of the panel's own interval.
+    ///
+    /// A panel's interval is how often its data goes stale, not how long a
+    /// failure deserves to sit on screen. The first fetch happens the moment the
+    /// app launches, which is exactly when the network is least likely to be up
+    /// and a lapsed sign-in has not yet renewed itself — and a five-minute panel
+    /// showed that first failure for five minutes.
+    private nonisolated static let retryDelay: TimeInterval = 5
+    /// How many quick retries a panel gets before it settles back onto its own
+    /// interval. Enough to ride out a launch, not enough to hammer a portal
+    /// that is genuinely down.
+    private nonisolated static let maxQuickRetries = 3
+
+    /// How long to wait before the next fetch: a short retry while a run of
+    /// failures is still young, otherwise the panel's own interval.
+    nonisolated static func delay(afterFailures failures: Int,
+                                  interval: TimeInterval) -> TimeInterval {
+        guard failures > 0, failures <= maxQuickRetries else { return interval }
+        return min(retryDelay, interval)
+    }
+
     private func makeLoop(for panel: Panel) -> Task<Void, Never> {
         let interval = max(15, panel.settings.refreshSeconds)
         return Task { [weak self] in
+            var failures = 0
             while !Task.isCancelled {
-                await self?.fetchAndStore(panel: panel)
-                try? await Task.sleep(for: .seconds(interval))
+                let succeeded = await self?.fetchAndStore(panel: panel) ?? true
+                failures = succeeded ? 0 : failures + 1
+                try? await Task.sleep(
+                    for: .seconds(Self.delay(afterFailures: failures, interval: interval)))
             }
         }
     }
@@ -70,10 +95,19 @@ public final class DataSourceEngine {
         return .series(SeriesData(points: points, unit: unit))
     }
 
-    private func fetchAndStore(panel: Panel) async {
+    /// Fetches a panel and stores the result, reporting whether it worked so the
+    /// loop can decide between a quick retry and the panel's own interval.
+    ///
+    /// Panels that render themselves — a live web clip, a HomeKit camera — hand
+    /// back nothing to store and count as success: there is no failure to retry.
+    @discardableResult
+    private func fetchAndStore(panel: Panel) async -> Bool {
         let snapshot = await fetch(panel: panel)
-        guard !Task.isCancelled, let snapshot else { return }
+        guard !Task.isCancelled else { return true }
+        guard let snapshot else { return true }
         snapshots.set(snapshot, for: panel.snapshotKey)
+        if case .error = snapshot { return false }
+        return true
     }
 
     /// Runs a K12-backed fetch, falling back to the Mac bridge when this device

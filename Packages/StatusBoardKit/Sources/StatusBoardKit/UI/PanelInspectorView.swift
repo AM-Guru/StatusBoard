@@ -429,6 +429,8 @@ public struct PanelInspectorView: View {
         case .analog: return "Hands on a tick dial, sized to the panel. Squarer panels suit it best."
         case .dial: return "The whole day on one ring, midnight at the bottom and noon at the top, with daylight drawn as an arc when a location is set."
         case .modular: return "Oversized time with the weekday, date and seconds arranged around it — widest at three or more cells across."
+        case .solar: return "A 24-hour dial with midnight at the bottom and noon at the top, its sky split along the line from sunrise to sunset — so the horizon turns through the year as the days lengthen — and the sun riding the ring at the hour it is now."
+        case .sunBand: return "The same day unrolled: midnight to midnight left to right, the golden hour and each stage of twilight in its own band, and the sun on its altitude curve."
         case .sunArc: return "The sun's path across the panel: sunrise at one end, sunset at the other, and the sun where it is now."
         case .sunTimes: return "Sunrise and sunset as times, with a bar showing how much daylight is left."
         }

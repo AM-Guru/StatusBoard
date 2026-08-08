@@ -240,13 +240,24 @@ public final class K12Session {
 
     @ObservationIgnored public var reauthenticator: Reauthenticator?
 
-    /// How long to wait before trying again after a failed attempt. Panels
-    /// refresh on their own timers — without this, a portal that is down (or a
-    /// password that has changed) would be hammered once per panel per minute.
-    private static let recoveryBackoff: TimeInterval = 120
+    /// How long to wait before trying again after a failed attempt, escalating
+    /// with each consecutive failure. Panels refresh on their own timers —
+    /// without a backoff, a portal that is down (or a password that has changed)
+    /// would be hammered once per panel per minute.
+    ///
+    /// The first wait is short on purpose. The failure that matters most is the
+    /// one at launch, where the network is usually just not up yet; a flat
+    /// two-minute penalty for that outlived the problem by a long way and left
+    /// the panel reading as signed out when it wasn't.
+    private nonisolated static let recoveryBackoffs: [TimeInterval] = [5, 30, 120]
+
+    nonisolated static func recoveryBackoff(afterFailures failures: Int) -> TimeInterval {
+        recoveryBackoffs[min(max(0, failures), recoveryBackoffs.count - 1)]
+    }
 
     @ObservationIgnored private var recoveryTask: Task<Bool, Never>?
     @ObservationIgnored private var nextRecoveryAllowed: Date = .distantPast
+    @ObservationIgnored private var consecutiveFailures = 0
 
     /// When a re-authentication last succeeded, for the settings screen.
     public private(set) var lastRecovery: Date?
@@ -268,8 +279,11 @@ public final class K12Session {
         if succeeded {
             lastRecovery = Date()
             nextRecoveryAllowed = .distantPast
+            consecutiveFailures = 0
         } else {
-            nextRecoveryAllowed = Date().addingTimeInterval(Self.recoveryBackoff)
+            nextRecoveryAllowed = Date().addingTimeInterval(
+                Self.recoveryBackoff(afterFailures: consecutiveFailures))
+            consecutiveFailures += 1
         }
         return succeeded
     }

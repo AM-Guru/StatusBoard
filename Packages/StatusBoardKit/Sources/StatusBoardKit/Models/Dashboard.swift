@@ -263,7 +263,7 @@ extension Dashboard {
     /// before one is chosen for a real board.
     public static func clockFaces() -> Dashboard {
         var board = Dashboard(name: "Clock Faces")
-        board.grid = BoardGrid(columns: 8, rows: 6)
+        board.grid = BoardGrid(columns: 8, rows: 9)
         board.appearance.theme = .nocturne
 
         func clock(_ title: String, _ style: ClockStyle, _ frame: GridRect,
@@ -297,6 +297,8 @@ extension Dashboard {
             clock("24-Hour Dial", .dial, GridRect(x: 5, y: 2, width: 3, height: 2)),
             clock("Sun Arc", .sunArc, GridRect(x: 0, y: 3, width: 3, height: 3)),
             clock("Sunrise & Sunset", .sunTimes, GridRect(x: 3, y: 4, width: 5, height: 2)),
+            clock("Solar Dial", .solar, GridRect(x: 0, y: 6, width: 4, height: 3)),
+            clock("Twilight Band", .sunBand, GridRect(x: 4, y: 6, width: 4, height: 3)),
         ]
         return board
     }

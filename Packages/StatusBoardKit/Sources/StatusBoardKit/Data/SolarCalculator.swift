@@ -103,6 +103,49 @@ public enum SolarCalculator {
         return nil
     }
 
+    // MARK: - Where the sun is right now
+
+    /// The sun's altitude above the horizon at one instant, in degrees:
+    /// positive when it is up, negative when it is down, −90…90.
+    ///
+    /// This is what separates a sun *chart* from a pair of sun *times* — the
+    /// twilight bands, and how high the sun climbs at all, are the shape of
+    /// this curve through the day.
+    public static func altitude(at date: Date, latitude: Double, longitude: Double) -> Double {
+        let days = daysSinceJ2000(date)
+        let position = position(daysSinceJ2000: days)
+        let hourAngle = siderealTime(daysSinceJ2000: days, longitude: longitude)
+            - position.rightAscension
+        let sine = sin(radians(latitude)) * sin(position.declination)
+            + cos(radians(latitude)) * cos(position.declination) * cos(hourAngle)
+        return degrees(asin(min(1, max(-1, sine))))
+    }
+
+    /// Days since J2000.0, the epoch every one of these series is written in.
+    static func daysSinceJ2000(_ date: Date) -> Double {
+        date.timeIntervalSince1970 / 86400 + julianUnixEpoch - 2451545.0
+    }
+
+    /// Greenwich sidereal time moved east to a place's own meridian, in
+    /// radians — the zero the hour angles are measured from.
+    static func siderealTime(daysSinceJ2000 days: Double, longitude: Double) -> Double {
+        radians(280.16 + 360.9856235 * days + longitude)
+    }
+
+    /// The sun's place on the sky sphere, in radians. Same low-precision
+    /// series `solve` uses, evaluated for an instant rather than for a day.
+    static func position(daysSinceJ2000 days: Double)
+    -> (declination: Double, rightAscension: Double) {
+        let meanAnomaly = (357.5291 + 0.98560028 * days).truncatingRemainder(dividingBy: 360)
+        let center = 1.9148 * sin(radians(meanAnomaly))
+            + 0.0200 * sin(radians(2 * meanAnomaly))
+            + 0.0003 * sin(radians(3 * meanAnomaly))
+        let eclipticLongitude = radians(meanAnomaly + center + 180 + 102.9372)
+        let obliquity = radians(23.4397)
+        return (asin(sin(eclipticLongitude) * sin(obliquity)),
+                atan2(sin(eclipticLongitude) * cos(obliquity), cos(eclipticLongitude)))
+    }
+
     // MARK: - The equation
 
     private static func solve(anchor: Date, day: Date,
@@ -155,6 +198,6 @@ public enum SolarCalculator {
         Date(timeIntervalSince1970: (julian - julianUnixEpoch) * 86400)
     }
 
-    private static func radians(_ degrees: Double) -> Double { degrees * .pi / 180 }
-    private static func degrees(_ radians: Double) -> Double { radians * 180 / .pi }
+    static func radians(_ degrees: Double) -> Double { degrees * .pi / 180 }
+    static func degrees(_ radians: Double) -> Double { radians * 180 / .pi }
 }

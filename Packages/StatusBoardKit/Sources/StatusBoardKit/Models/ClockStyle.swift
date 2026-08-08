@@ -18,6 +18,12 @@ public enum ClockStyle: String, Codable, CaseIterable, Sendable, Identifiable {
     /// Oversized time with the date and seconds stacked beside it, after the
     /// modular watch layouts.
     case modular
+    /// The solar dial: a 24-hour sky split by the sunrise-to-sunset horizon,
+    /// with the sun riding the ring. After the solar watch faces, but filling
+    /// a rectangle rather than a round screen.
+    case solar
+    /// The same day unrolled into a straight band, twilight by twilight.
+    case sunBand
     /// The sun's path across the panel, sunrise at one end and sunset at the
     /// other, with the sun where it is now.
     case sunArc
@@ -33,6 +39,8 @@ public enum ClockStyle: String, Codable, CaseIterable, Sendable, Identifiable {
         case .analog: return "Analog"
         case .dial: return "24-Hour Dial"
         case .modular: return "Modular"
+        case .solar: return "Solar Dial"
+        case .sunBand: return "Twilight Band"
         case .sunArc: return "Sun Arc"
         case .sunTimes: return "Sunrise & Sunset"
         }
@@ -45,6 +53,8 @@ public enum ClockStyle: String, Codable, CaseIterable, Sendable, Identifiable {
         case .analog: return "clock"
         case .dial: return "circle.dotted"
         case .modular: return "rectangle.grid.1x2"
+        case .solar: return "sun.max"
+        case .sunBand: return "chart.line.uptrend.xyaxis"
         case .sunArc: return "sun.horizon"
         case .sunTimes: return "sunrise"
         }
@@ -53,7 +63,7 @@ public enum ClockStyle: String, Codable, CaseIterable, Sendable, Identifiable {
     /// Whether the face needs a latitude and longitude to draw anything.
     public var needsLocation: Bool {
         switch self {
-        case .sunArc, .sunTimes: return true
+        case .solar, .sunBand, .sunArc, .sunTimes: return true
         case .lcd, .flip, .analog, .dial, .modular: return false
         }
     }
@@ -76,6 +86,8 @@ public enum ClockStyle: String, Codable, CaseIterable, Sendable, Identifiable {
         switch self {
         case .lcd, .flip, .modular: return (3, 1)
         case .analog, .dial: return (2, 2)
+        case .solar: return (4, 2)
+        case .sunBand: return (5, 2)
         case .sunArc, .sunTimes: return (4, 2)
         }
     }

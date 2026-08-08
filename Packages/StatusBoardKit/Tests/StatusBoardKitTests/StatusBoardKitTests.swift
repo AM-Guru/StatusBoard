@@ -2242,6 +2242,45 @@ struct SessionCookieJarTests {
                                                cookieDomain: "k12.com"))
         #expect(!SessionCookieJar.domainMatches(host: "notk12.com", cookieDomain: "k12.com"))
     }
+
+    /// A sign-in that fails at launch — usually because the network isn't up
+    /// yet — used to be punished with a flat two-minute wait, so the panel's
+    /// own retry seconds later was refused before it tried anything.
+    @Test func theFirstFailedRecoveryIsRetriedWithinSeconds() {
+        #expect(K12Session.recoveryBackoff(afterFailures: 0) == 5)
+        #expect(K12Session.recoveryBackoff(afterFailures: 1) == 30)
+        // A portal that is genuinely down still settles into a long wait.
+        #expect(K12Session.recoveryBackoff(afterFailures: 2) == 120)
+        #expect(K12Session.recoveryBackoff(afterFailures: 99) == 120)
+    }
+}
+
+@Suite struct FetchRetryTests {
+
+    /// The first fetch happens at launch, when a lapsed sign-in has not yet
+    /// renewed itself. Leaving that failure standing for the panel's whole
+    /// interval meant a five-minute panel showed the error for five minutes.
+    @Test func aFailedFetchIsRetriedInSecondsNotAtTheNextInterval() {
+        #expect(DataSourceEngine.delay(afterFailures: 1, interval: 300) == 5)
+        #expect(DataSourceEngine.delay(afterFailures: 3, interval: 300) == 5)
+    }
+
+    @Test func aSucceedingPanelKeepsItsOwnInterval() {
+        #expect(DataSourceEngine.delay(afterFailures: 0, interval: 300) == 300)
+    }
+
+    /// Quick retries are for riding out a launch, not for hammering a source
+    /// that is down: a longer run of failures falls back to the interval.
+    @Test func aLongRunOfFailuresFallsBackToTheInterval() {
+        #expect(DataSourceEngine.delay(afterFailures: 4, interval: 300) == 300)
+        #expect(DataSourceEngine.delay(afterFailures: 40, interval: 300) == 300)
+    }
+
+    /// A panel that refreshes faster than the retry delay is never slowed down
+    /// by it.
+    @Test func aFastPanelIsNeverSlowedDownByTheRetry() {
+        #expect(DataSourceEngine.delay(afterFailures: 1, interval: 3) == 3)
+    }
 }
 
 @Suite("Shared Canvas credentials")
@@ -3770,6 +3809,46 @@ struct SessionCookieJarTests {
         #expect(sunset != nil && sunset! > evening)
     }
 
+    @Test func theSunIsHighestAtSolarNoonAndOnTheHorizonAtSunrise() {
+        let zone = TimeZone(identifier: "America/Los_Angeles")!
+        // The equinox, where the sun stands over the equator: noon altitude is
+        // 90° minus the latitude, which is the one case with an answer that
+        // can be checked by hand.
+        let solar = SolarCalculator.day(
+            containing: Self.date(2026, 3, 20, zone: "America/Los_Angeles"),
+            latitude: 37.7749, longitude: -122.4194, timeZone: zone)
+        let noon = SolarCalculator.altitude(at: solar.solarNoon, latitude: 37.7749,
+                                            longitude: -122.4194)
+        #expect(abs(noon - (90 - 37.7749)) < 1.5)
+        // And at sunrise the sun's centre sits just under the horizon, which
+        // is the definition the times themselves were solved for.
+        let rise = SolarCalculator.altitude(at: solar.sunrise!, latitude: 37.7749,
+                                            longitude: -122.4194)
+        #expect(abs(rise - (-0.833)) < 0.4)
+        // An hour before sunrise it must be lower still — a sign error in the
+        // hour angle would mirror the day and break exactly this.
+        let earlier = SolarCalculator.altitude(at: solar.sunrise!.addingTimeInterval(-3600),
+                                               latitude: 37.7749, longitude: -122.4194)
+        #expect(earlier < rise)
+    }
+
+    @Test func altitudeAgreesWithThePolarCases() {
+        // August at McMurdo: still polar night, so the sun stays down all day.
+        let start = Self.date(2026, 8, 7, hour: 0, zone: "Pacific/Auckland")
+        for hour in 0..<24 {
+            let altitude = SolarCalculator.altitude(at: start.addingTimeInterval(Double(hour) * 3600),
+                                                    latitude: -77.85, longitude: 166.67)
+            #expect(altitude < 0)
+        }
+        // Midsummer at Tromsø: the sun never touches the horizon.
+        let arctic = Self.date(2026, 6, 21, hour: 0, zone: "Europe/Oslo")
+        for hour in 0..<24 {
+            let altitude = SolarCalculator.altitude(at: arctic.addingTimeInterval(Double(hour) * 3600),
+                                                    latitude: 69.65, longitude: 18.96)
+            #expect(altitude > 0)
+        }
+    }
+
     @Test func aPlaceEastOfGreenwichSeesTheSunFirst() {
         let tokyo = SolarCalculator.day(
             containing: Self.date(2026, 4, 10, zone: "Asia/Tokyo"),
@@ -3899,5 +3978,78 @@ struct SessionCookieJarTests {
         for panel in board.panels where panel.settings.clockStyle.needsLocation {
             #expect(panel.settings.latitude != nil && panel.settings.longitude != nil)
         }
+    }
+}
+
+@Suite struct MoonCalculatorTests {
+    /// 21 January 2000, 04:40 UTC — the total lunar eclipse, so the moon was
+    /// exactly full and exactly opposite the sun. Two weeks earlier, 6 January
+    /// at 18:14 UTC, was the new moon of the same lunation.
+    static let fullMoon = Date(timeIntervalSince1970: 948_429_600)      // 2000-01-21 04:40Z
+    static let newMoon = Date(timeIntervalSince1970: 947_182_440)       // 2000-01-06 18:14Z
+
+    @Test func theEclipseMoonIsFullAndOppositeTheSun() {
+        let moon = MoonCalculator.position(at: Self.fullMoon, latitude: 51.48, longitude: 0)
+        #expect(moon.illumination > 0.98)
+        #expect(abs(moon.phase - 0.5) < 0.02)
+        #expect(moon.phaseName == "Full Moon")
+        // Opposite the sun is what "full" means, and it is also what puts the
+        // moon on the far side of a 24-hour dial.
+        #expect(abs(abs(moon.hoursFromSun) - 12) < 0.5)
+    }
+
+    @Test func theNewMoonIsDarkAndRidesWithTheSun() {
+        let moon = MoonCalculator.position(at: Self.newMoon, latitude: 51.48, longitude: 0)
+        #expect(moon.illumination < 0.02)
+        #expect(moon.phaseName == "New Moon")
+        #expect(abs(moon.hoursFromSun) < 0.6)
+    }
+
+    @Test func theQuartersFallHalfwayBetween() {
+        // First quarter is a week after the new moon: half lit, and six hours
+        // behind the sun — which is what puts it on the meridian at sunset.
+        let firstQuarter = Self.newMoon.addingTimeInterval(7.38 * 86400)
+        let moon = MoonCalculator.position(at: firstQuarter, latitude: 51.48, longitude: 0)
+        #expect(abs(moon.illumination - 0.5) < 0.06)
+        #expect(moon.isWaxing)
+        #expect(abs(moon.hoursFromSun + 6) < 0.6)
+    }
+
+    @Test func aLunationRunsFromDarkToFullAndBack() {
+        var illuminations: [Double] = []
+        for hour in stride(from: 0.0, to: 29.53 * 24, by: 6) {
+            let moon = MoonCalculator.position(
+                at: Self.newMoon.addingTimeInterval(hour * 3600),
+                latitude: 0, longitude: 0)
+            #expect(moon.illumination >= 0 && moon.illumination <= 1)
+            #expect(moon.phase >= 0 && moon.phase < 1)
+            illuminations.append(moon.illumination)
+        }
+        #expect(illuminations.min()! < 0.01)
+        #expect(illuminations.max()! > 0.99)
+        // Waxing for the first half of the cycle, waning for the second.
+        #expect(MoonCalculator.position(at: Self.newMoon.addingTimeInterval(5 * 86400),
+                                        latitude: 0, longitude: 0).isWaxing)
+        #expect(!MoonCalculator.position(at: Self.newMoon.addingTimeInterval(20 * 86400),
+                                         latitude: 0, longitude: 0).isWaxing)
+    }
+
+    @Test func theMoonRisesAndSetsLikeAnythingElse() {
+        // Over a day the moon must pass both above and below the horizon at a
+        // temperate latitude — a sign error in the hour angle pins it to one.
+        var altitudes: [Double] = []
+        for hour in 0..<24 {
+            altitudes.append(MoonCalculator.position(
+                at: Self.fullMoon.addingTimeInterval(Double(hour) * 3600),
+                latitude: 51.48, longitude: 0).altitude)
+        }
+        #expect(altitudes.contains { $0 > 5 })
+        #expect(altitudes.contains { $0 < -5 })
+        // A full moon is up when the sun is down: at midnight it is high, and
+        // at midday it is under the horizon.
+        let midnight = MoonCalculator.position(at: Self.fullMoon, latitude: 51.48,
+                                               longitude: 0)
+        let sun = SolarCalculator.altitude(at: Self.fullMoon, latitude: 51.48, longitude: 0)
+        #expect((midnight.altitude > 0) != (sun > 0))
     }
 }

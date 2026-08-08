@@ -207,6 +207,11 @@ public enum AccessibilitySummary {
             text += ". Sunrise \(formatter.string(from: sunrise)),"
             text += " sunset \(formatter.string(from: sunset))"
         }
+        // The solar dial draws the moon too, so the spoken version says it.
+        if settings.clockStyle == .solar {
+            let moon = MoonCalculator.position(at: now, latitude: latitude, longitude: longitude)
+            text += ". \(moon.phaseName), \(Int((moon.illumination * 100).rounded())) percent lit"
+        }
         return text
     }
 

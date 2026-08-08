@@ -82,11 +82,54 @@ struct WebClipWebView: PlatformViewRepresentable {
         private var loginAttempts = 0
         private var lastAttempt = Date.distantPast
 
-        deinit { reloadTimer?.invalidate() }
+        /// How long to wait before reloading a page that wouldn't load, and how
+        /// many times to try, before leaving it to the panel's reload timer.
+        ///
+        /// That timer is at least a full refresh interval away — five minutes
+        /// by default — which is a long time to show an empty panel when the
+        /// usual cause is a launch that beat the network to it.
+        private static let retryDelay: Duration = .seconds(5)
+        private static let maxRetries = 3
+
+        private var retries = 0
+        private var retryTask: Task<Void, Never>?
+
+        deinit {
+            reloadTimer?.invalidate()
+            retryTask?.cancel()
+        }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            // The page arrived, so a later failure starts its own retry budget.
+            retries = 0
             guard autoLogin else { return }
             Task { @MainActor in await self.signInIfNeeded(webView) }
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!,
+                     withError error: Error) {
+            retryAfterFailure(webView, error: error)
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!,
+                     withError error: Error) {
+            retryAfterFailure(webView, error: error)
+        }
+
+        private func retryAfterFailure(_ webView: WKWebView, error: Error) {
+            // A navigation that was cancelled is not a page that failed to
+            // arrive: it's usually this panel blocking a deep link, or one load
+            // superseding another. Reloading over those would fight the page.
+            let error = error as NSError
+            if error.domain == NSURLErrorDomain, error.code == NSURLErrorCancelled { return }
+            guard retries < Self.maxRetries else { return }
+            retries += 1
+            retryTask?.cancel()
+            retryTask = Task { @MainActor [weak webView] in
+                try? await Task.sleep(for: Self.retryDelay)
+                guard !Task.isCancelled else { return }
+                webView?.reload()
+            }
         }
 
         /// Advances the sign-in one step whenever the clip lands on a login

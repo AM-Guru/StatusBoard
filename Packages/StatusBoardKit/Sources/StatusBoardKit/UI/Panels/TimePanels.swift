@@ -38,6 +38,10 @@ struct ClockPanelContent: View {
             SolarDialClockFace(settings: settings, date: date)
         case .modular:
             ModularClockFace(settings: settings, date: date)
+        case .solar:
+            SolarClockFace(settings: settings, date: date)
+        case .sunBand:
+            TwilightBandClockFace(settings: settings, date: date)
         case .sunArc:
             SunArcClockFace(settings: settings, date: date)
         case .sunTimes:
