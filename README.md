@@ -259,9 +259,17 @@ cd Packages/StatusBoardKit && swift test
    Rename them in `project.yml` **and** in
    `Packages/StatusBoardKit/Sources/StatusBoardKit/Store/AppGroup.swift`
    (`SBIdentifiers`) if you use your own prefix.
-3. The CloudKit schema is created automatically on first sync (one record type,
-   `Dashboard`, in a private zone). Unsigned/entitlement-less dev builds detect
-   the situation and simply run with sync off.
+3. A Development build creates the CloudKit schema on first sync: record type
+   `Dashboard`, field `payload` of type **Bytes**, in a private custom zone.
+   CloudKit does **not** create schemas in Production. Before TestFlight or App
+   Store distribution, open CloudKit Console for `iCloud.guru.am.statusboard`,
+   confirm that type and field in Development, and choose **Deploy Schema
+   Changes…**. TestFlight always uses Production.
+4. Release CI verifies `Dashboard.payload` in Production before uploading. Add
+   a CloudKit management token as the `CLOUDKIT_MANAGEMENT_TOKEN` environment
+   secret; otherwise the release intentionally stops before building a package
+   that cannot sync. Unsigned/entitlement-less local builds detect the situation
+   and simply run with sync off.
 
 ## The Mac bridge
 

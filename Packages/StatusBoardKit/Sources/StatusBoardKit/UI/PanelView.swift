@@ -56,7 +56,7 @@ public struct PanelView: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(style.accent)
                     Text(panel.title.uppercased())
-                        .font(SBTheme.titleFont(size: 11))
+                        .font(theme.panelTitleFont(size: 11))
                         .foregroundStyle(style.textSecondary)
                         .kerning(1.5)
                         .lineLimit(1)
@@ -86,8 +86,13 @@ public struct PanelView: View {
             appearance.resolvedBorderColor(theme: theme,
                                            increasedContrast: colorSchemeContrast == .increased),
             lineWidth: colorSchemeContrast == .increased
-                ? max(2, appearance.resolvedBorderWidth())
-                : appearance.resolvedBorderWidth()))
+                ? max(2, appearance.resolvedBorderWidth(theme: theme))
+                : appearance.resolvedBorderWidth(theme: theme)))
+        .overlay {
+            SBThemePanelChrome(theme: theme, accent: style.accent,
+                               cornerRadius: appearance.resolvedCornerRadius(theme: theme))
+                .clipShape(shape)
+        }
         .shadow(color: appearance.glowRadius > 0 ? style.accent.opacity(0.55) : .clear,
                 radius: appearance.glowRadius)
         // A panel speaks as one element: charts and LCD digits are decorative

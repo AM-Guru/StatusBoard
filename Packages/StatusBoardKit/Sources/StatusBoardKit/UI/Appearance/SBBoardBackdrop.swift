@@ -54,6 +54,11 @@ struct SBBoardBackdropView: View {
     var body: some View {
         ZStack {
             SBGradientFill(colors: baseColors, angle: appearance.gradientAngle)
+            // Named themes now carry their own surface treatment. A manually
+            // selected wallpaper is additive and remains fully user-controlled.
+            SBThemeTextureView(texture: palette.texture,
+                               accent: Color(hex: palette.accent),
+                               isLight: palette.isLight, intensity: 0.72)
             if appearance.wallpaper != .none {
                 SBWallpaperView(wallpaper: appearance.wallpaper, size: size,
                                 tint: Color(hex: palette.textPrimary),

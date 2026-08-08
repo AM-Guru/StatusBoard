@@ -88,6 +88,10 @@ done
 if [[ -n "${ASC_KEY_ID:-}" && ${#ASC_KEY_ID} -ne 10 ]]; then
   fail "ASC_KEY_ID should be 10 characters, got ${#ASC_KEY_ID}"
 fi
+
+if [[ -n "${CLOUDKIT_MANAGEMENT_TOKEN:-}" && ${#CLOUDKIT_MANAGEMENT_TOKEN} -lt 24 ]]; then
+  fail "CLOUDKIT_MANAGEMENT_TOKEN is unexpectedly short"
+fi
 if [[ -n "${ASC_ISSUER_ID:-}" && ${#ASC_ISSUER_ID} -ne 36 ]]; then
   fail "ASC_ISSUER_ID should be a 36-character UUID, got ${#ASC_ISSUER_ID}"
 fi

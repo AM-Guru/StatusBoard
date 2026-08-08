@@ -211,14 +211,18 @@ struct TessieStatGrid: View {
                         .foregroundStyle(stat.tone.color(in: style))
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
-                    if let detail = stat.detail {
-                        Text(detail)
-                            .font(.system(size: 9, design: .rounded))
-                            .foregroundStyle(style.textSecondary)
-                            .lineLimit(1)
-                    }
+                    // Every tile reserves the same third row. Some Tessie
+                    // readings have a qualifier ("since parked", an ETA,
+                    // etc.) and some do not; allowing that optional content
+                    // to drive the tile height made the footer look ragged.
+                    Text(stat.detail ?? " ")
+                        .font(.system(size: 9, design: .rounded))
+                        .foregroundStyle(style.textSecondary)
+                        .lineLimit(1)
+                        .opacity(stat.detail == nil ? 0 : 1)
+                        .accessibilityHidden(stat.detail == nil)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 43, alignment: .topLeading)
                 .padding(.vertical, 5)
                 .padding(.horizontal, 7)
                 .background(style.separator.opacity(0.3),

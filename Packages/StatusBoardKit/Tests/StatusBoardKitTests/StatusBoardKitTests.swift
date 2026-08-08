@@ -3431,6 +3431,21 @@ struct SessionCookieJarTests {
         #expect(PanelSettings().weatherLocationMode == .current)
     }
 
+    @Test func automaticWeatherUnitsResolveOnceForHeadlineAndForecast() {
+        #expect(WeatherUnits.automatic.resolved(for: Locale(identifier: "en_US")) == .fahrenheit)
+        #expect(WeatherUnits.automatic.resolved(for: Locale(identifier: "en_GB")) == .celsius)
+        #expect(WeatherUnits.celsius.resolved(for: Locale(identifier: "en_US")) == .celsius)
+    }
+
+    @Test func namedThemesCarryDistinctSurfaceTreatments() {
+        let named = SBThemeName.allCases.filter { $0 != .custom }
+        #expect(!named.contains { $0.palette.texture == .none })
+        #expect(Set(named.map { $0.palette.texture }).count == named.count)
+        #expect(SBThemeName.terminal.palette.texture == .terminalScanlines)
+        #expect(SBThemeName.paper.palette.texture == .paperFiber)
+        #expect(SBThemeName.custom.palette.texture == .none)
+    }
+
     @Test func integrationCatalogCoversEveryPanelAndWidgetKit() {
         #expect(Set(IntegrationCatalog.all.map(\.kind)) == Set(PanelKind.allCases))
         #expect(!IntegrationCatalog.all.contains { !$0.supportsWidgetKit })

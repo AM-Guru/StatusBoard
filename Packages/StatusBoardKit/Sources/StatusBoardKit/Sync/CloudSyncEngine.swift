@@ -222,12 +222,16 @@ public final class CloudSyncEngine: NSObject {
             return "This iCloud account is out of storage"
         case .managedAccountRestricted, .permissionFailure:
             return "This iCloud account isn't allowed to sync boards"
-        case .invalidArguments, .badContainer, .badDatabase:
-            // Almost always the schema: record types auto-create in the
-            // development environment only, so a TestFlight or App Store build
-            // finds nothing until the schema is deployed to production in the
-            // CloudKit Console.
-            return "iCloud rejected the board format — the CloudKit schema may not be deployed to production"
+        case .invalidArguments:
+            // TestFlight and App Store builds always use Production, where
+            // CloudKit never creates a missing record type or field on demand.
+            // Name the exact server contract so this cannot be mistaken for a
+            // corrupt user board or an unsupported local JSON version.
+            return "iCloud Production is missing Dashboard.payload. The developer must deploy the CloudKit schema before this TestFlight build can sync."
+        case .badContainer:
+            return "This build cannot access the Status Board iCloud container. Check its signing profile and iCloud container entitlement."
+        case .badDatabase:
+            return "The Status Board iCloud database is unavailable for this build. Check the CloudKit container environment and production configuration."
         case .zoneNotFound, .userDeletedZone:
             return "No boards have been uploaded to iCloud yet"
         default:

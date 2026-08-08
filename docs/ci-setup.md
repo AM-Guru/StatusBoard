@@ -203,7 +203,8 @@ skipped, so it does not go unnoticed.
 2. **The tvOS App Store profile**, since tvOS signs manually:
    `~/Library/Developer/Xcode/UserData/Provisioning Profiles/` on media needs
    `Status Board tvOS App Store`.
-3. **The four repository secrets** below.
+3. **The repository secrets** below, including a CloudKit management token so
+   CI can prove the Production schema is ready for TestFlight.
 
 ## One-time: repository secrets
 
@@ -216,6 +217,32 @@ skipped, so it does not go unnoticed.
 | `ASC_PRIVATE_KEY` | Full contents of `AuthKey_<KEY_ID>.p8`, including the BEGIN/END lines |
 | `DEVELOPMENT_TEAM` | Your 10-character Apple team id |
 | `APP_STORE_INSTALLER_P12_BASE64` | Optional. Base64 of the `3rd Party Mac Developer Installer` `.p12`; unlocks the macOS leg. Uses `APP_STORE_DISTRIBUTION_P12_PASSWORD` — it is deliberately not a second password |
+| `CLOUDKIT_MANAGEMENT_TOKEN` | Management token from CloudKit Console Settings. `cktool` uses it to inspect the Production schema before release; it is never placed in the app. |
+
+## CloudKit Production is a release prerequisite
+
+Development builds can create `Dashboard.payload` on first write. TestFlight
+and App Store builds use CloudKit Production, which will reject that write if
+the schema has not been deployed. This is an Apple-side deployment step, not a
+board-decoding failure in the app.
+
+Before the first TestFlight release, or after adding a CloudKit record/field:
+
+1. Open CloudKit Console and select `iCloud.guru.am.statusboard`.
+2. In **Development**, confirm record type `Dashboard` has a `payload` field of
+   type **Bytes**. Running a signed Development build and saving a board creates
+   it if necessary.
+3. Choose **Deploy Schema Changes…** and deploy it to Production.
+4. In CloudKit Console Settings, create a management token and save it as the
+   GitHub Actions secret `CLOUDKIT_MANAGEMENT_TOKEN`.
+5. Run `Scripts/verify-cloudkit-production-schema.sh` with `APPLE_TEAM_ID` and
+   that token in the environment, or start the release workflow. Both inspect
+   Production and fail if the required contract is missing.
+
+The release gate checks the server instead of relying on a remembered manual
+step. The app also reports missing `Dashboard.payload` explicitly; container,
+database, and signing errors have separate messages so they no longer all look
+like corrupt board data.
 
 The workflow writes the key to `~/.appstoreconnect/private_keys/` for the build
 and deletes it again in an `always()` step, so it never lingers on the runner.

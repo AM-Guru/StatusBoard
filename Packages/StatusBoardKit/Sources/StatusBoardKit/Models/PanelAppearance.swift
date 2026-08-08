@@ -42,65 +42,89 @@ public enum SBThemeName: String, Codable, CaseIterable, Sendable, Identifiable {
 
     public var palette: SBPalette {
         switch self {
-        case .board, .custom:
+        case .board:
             return SBPalette(background: [0x191D23], boardBackground: [0x0E1013],
                              border: 0x2A2F37, textPrimary: 0xF2F4F6,
                              textSecondary: 0x9AA3AD, accent: 0xFFA028,
-                             cornerRadius: 12, isLight: false)
+                             cornerRadius: 12, isLight: false, texture: .dashboard)
+        case .custom:
+            return SBPalette(background: [0x191D23], boardBackground: [0x0E1013],
+                             border: 0x2A2F37, textPrimary: 0xF2F4F6,
+                             textSecondary: 0x9AA3AD, accent: 0xFFA028,
+                             cornerRadius: 12, isLight: false, texture: .none)
         case .glass:
             return SBPalette(background: [0xFFFFFF], boardBackground: [0x101828, 0x1E2A44],
                              border: 0xFFFFFF, textPrimary: 0xFFFFFF,
                              textSecondary: 0xC7D0DC, accent: 0x7FD4FF,
                              cornerRadius: 18, isLight: false,
                              backgroundAlpha: 0.10, borderAlpha: 0.22,
-                             material: .thin)
+                             material: .thin, texture: .glass)
         case .carbon:
             return SBPalette(background: [0x141414, 0x1C1C1C], boardBackground: [0x000000],
                              border: 0x333333, textPrimary: 0xF5F5F5,
                              textSecondary: 0x8E8E93, accent: 0xFF9F0A,
-                             cornerRadius: 10, isLight: false)
+                             cornerRadius: 10, isLight: false, texture: .carbonWeave)
         case .slate:
             return SBPalette(background: [0x1E293B], boardBackground: [0x0B1220],
                              border: 0x334155, textPrimary: 0xE2E8F0,
                              textSecondary: 0x94A3B8, accent: 0x38BDF8,
-                             cornerRadius: 14, isLight: false)
+                             cornerRadius: 14, isLight: false, texture: .slateGrain)
         case .paper:
             return SBPalette(background: [0xFFFFFF], boardBackground: [0xEDE9E1],
                              border: 0xD6D0C4, textPrimary: 0x1C1C1E,
                              textSecondary: 0x6B6B70, accent: 0xC2410C,
-                             cornerRadius: 12, isLight: true)
+                             cornerRadius: 12, isLight: true, texture: .paperFiber)
         case .terminal:
             return SBPalette(background: [0x04120A], boardBackground: [0x010A05],
                              border: 0x1F6F3A, textPrimary: 0x7CFFA0,
                              textSecondary: 0x3E9E5F, accent: 0x39FF6A,
-                             cornerRadius: 4, isLight: false)
+                             cornerRadius: 4, isLight: false, texture: .terminalScanlines)
         case .blueprint:
             return SBPalette(background: [0x0B2B57], boardBackground: [0x061B38],
                              border: 0x2F6DB5, textPrimary: 0xE8F1FF,
                              textSecondary: 0x9DBDE8, accent: 0x69B7FF,
-                             cornerRadius: 6, isLight: false)
+                             cornerRadius: 6, isLight: false, texture: .blueprintGrid)
         case .sunset:
             return SBPalette(background: [0x3A1C4A, 0x7A2E4E], boardBackground: [0x1B0E2B, 0x4A1F3D],
                              border: 0x8E4A6B, textPrimary: 0xFFF1E6,
                              textSecondary: 0xE0B3C0, accent: 0xFF9E5E,
-                             cornerRadius: 16, isLight: false)
+                             cornerRadius: 16, isLight: false, texture: .sunsetGlow)
         case .aurora:
             return SBPalette(background: [0x0C2230, 0x123A3A], boardBackground: [0x04121A, 0x0A2430],
                              border: 0x1E5A5A, textPrimary: 0xE6FFF7,
                              textSecondary: 0x9BD3C4, accent: 0x5EE7B0,
-                             cornerRadius: 16, isLight: false)
+                             cornerRadius: 16, isLight: false, texture: .auroraRibbon)
         case .nocturne:
             return SBPalette(background: [0x141B3A, 0x0A1026], boardBackground: [0x05070F, 0x101A3A],
                              border: 0x2C3A6B, textPrimary: 0xE9F0FF,
                              textSecondary: 0x93A6D4, accent: 0x76B6FF,
-                             cornerRadius: 18, isLight: false)
+                             cornerRadius: 18, isLight: false, texture: .nocturneStars)
         case .daybreak:
             return SBPalette(background: [0xFFF6EA, 0xFFE7D2], boardBackground: [0xFFE3C8, 0xF8B98A],
                              border: 0xE4C6A6, textPrimary: 0x2B1B10,
                              textSecondary: 0x7A5C46, accent: 0xD9541E,
-                             cornerRadius: 16, isLight: true)
+                             cornerRadius: 16, isLight: true, texture: .daybreakRays)
         }
     }
+}
+
+/// The visual language layered over a theme's colors. Keeping this in the
+/// Foundation model means previews and tests can verify that named themes are
+/// genuinely distinct without importing SwiftUI; the actual drawing lives in
+/// `SBThemeTextureView`.
+public enum SBThemeTexture: String, Hashable, Sendable {
+    case none
+    case dashboard
+    case glass
+    case carbonWeave
+    case slateGrain
+    case paperFiber
+    case terminalScanlines
+    case blueprintGrid
+    case sunsetGlow
+    case auroraRibbon
+    case nocturneStars
+    case daybreakRays
 }
 
 /// A theme's resolved colors, as sRGB hex. Two or more `background` entries
@@ -119,12 +143,15 @@ public struct SBPalette: Hashable, Sendable {
     public var borderAlpha: Double
     /// Blur material the theme layers behind its (translucent) fill.
     public var material: PanelMaterialStyle
+    /// Pattern, lighting and surface treatment that gives the theme its feel.
+    public var texture: SBThemeTexture
 
     public init(background: [UInt32], boardBackground: [UInt32], border: UInt32,
                 textPrimary: UInt32, textSecondary: UInt32, accent: UInt32,
                 cornerRadius: Double, isLight: Bool,
                 backgroundAlpha: Double = 1, borderAlpha: Double = 1,
-                material: PanelMaterialStyle = .none) {
+                material: PanelMaterialStyle = .none,
+                texture: SBThemeTexture = .none) {
         self.background = background
         self.boardBackground = boardBackground
         self.border = border
@@ -136,6 +163,7 @@ public struct SBPalette: Hashable, Sendable {
         self.backgroundAlpha = backgroundAlpha
         self.borderAlpha = borderAlpha
         self.material = material
+        self.texture = texture
     }
 }
 

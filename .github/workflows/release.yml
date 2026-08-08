@@ -125,7 +125,15 @@ jobs:
           APP_STORE_DISTRIBUTION_P12_PASSWORD: ${{ secrets.APP_STORE_DISTRIBUTION_P12_PASSWORD }}
           APP_STORE_INSTALLER_P12_BASE64: ${{ secrets.APP_STORE_INSTALLER_P12_BASE64 }}
           TVOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.TVOS_PROVISIONING_PROFILE_BASE64 }}
+          CLOUDKIT_MANAGEMENT_TOKEN: ${{ secrets.CLOUDKIT_MANAGEMENT_TOKEN }}
         run: Scripts/validate-release-configuration.sh
+
+      - name: Verify production CloudKit schema
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.upload == 'true'
+        shell: bash
+        env:
+          CLOUDKIT_MANAGEMENT_TOKEN: ${{ secrets.CLOUDKIT_MANAGEMENT_TOKEN }}
+        run: Scripts/verify-cloudkit-production-schema.sh
 
       # ci-release.sh derives the build number (YYMMDD.R) itself, because that
       # needs the App Store Connect key, and submits the result to the beta

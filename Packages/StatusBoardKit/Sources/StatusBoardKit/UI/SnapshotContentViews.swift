@@ -480,17 +480,18 @@ struct WeatherContentView: View {
     /// so the source line knows whether there is anything to say.
     var settings = PanelSettings()
 
-    /// Celsius unless the panel says otherwise; `.automatic` keeps the
-    /// locale-driven behaviour every existing board already has.
+    /// The input has already been converted to one concrete unit. Using
+    /// `.asProvided` keeps Foundation from making a second, independent
+    /// Automatic decision for the headline.
     private var temperatureStyle: Measurement<UnitTemperature>.FormatStyle {
         let digits = Measurement<UnitTemperature>.FormatStyle(
-            width: .narrow, usage: settings.weatherUnits == .automatic ? .weather : .asProvided,
+            width: .narrow, usage: .asProvided,
             numberFormatStyle: .number.precision(.fractionLength(0)))
         return digits
     }
 
     private func temperature(_ celsius: Double) -> Measurement<UnitTemperature> {
-        switch settings.weatherUnits {
+        switch settings.weatherUnits.resolved() {
         case .automatic, .celsius: return Measurement(value: celsius, unit: .celsius)
         case .fahrenheit: return Measurement(value: celsius, unit: .celsius).converted(to: .fahrenheit)
         }
@@ -498,7 +499,7 @@ struct WeatherContentView: View {
 
     /// Degrees only, for the compact five-day strip.
     private func degrees(_ celsius: Double) -> String {
-        let value = settings.weatherUnits == .fahrenheit ? celsius * 9 / 5 + 32 : celsius
+        let value = settings.weatherUnits.resolved() == .fahrenheit ? celsius * 9 / 5 + 32 : celsius
         return "\(Int(value.rounded()))°"
     }
 

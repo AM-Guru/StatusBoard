@@ -147,6 +147,14 @@ public enum WeatherUnits: String, Codable, CaseIterable, Sendable, Identifiable 
         case .fahrenheit: return "Fahrenheit"
         }
     }
+
+    /// The concrete unit every part of a weather panel must use. Resolving
+    /// `.automatic` once prevents the headline's Foundation formatter and the
+    /// hand-formatted forecast cells from making different choices.
+    public func resolved(for locale: Locale = .current) -> WeatherUnits {
+        guard self == .automatic else { return self }
+        return locale.measurementSystem == .us ? .fahrenheit : .celsius
+    }
 }
 
 /// How forecast days are arranged inside a weather panel.

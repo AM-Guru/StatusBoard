@@ -56,9 +56,14 @@ struct PanelBackgroundView: View {
     private var fillLayer: some View {
         switch appearance.backgroundStyle {
         case .theme:
-            SBGradientFill(colors: palette.background.map(Color.init(hex:)),
-                           angle: appearance.gradientAngle)
-                .opacity(reduceTransparency ? 1 : palette.backgroundAlpha)
+            ZStack {
+                SBGradientFill(colors: palette.background.map(Color.init(hex:)),
+                               angle: appearance.gradientAngle)
+                    .opacity(reduceTransparency ? 1 : palette.backgroundAlpha)
+                SBThemeTextureView(texture: palette.texture, accent: accent,
+                                   isLight: palette.isLight,
+                                   intensity: reduceTransparency ? 0.72 : 1)
+            }
         case .solid:
             appearance.backgroundColorHex.flatMap(Color.init(hexString:))
                 ?? Color(hex: palette.background.first ?? 0x191D23)
@@ -142,7 +147,7 @@ extension PanelAppearance {
         return Color(hex: palette.border).opacity(increasedContrast ? 1 : palette.borderAlpha)
     }
 
-    func resolvedBorderWidth() -> CGFloat {
-        CGFloat(borderWidth ?? 1)
+    func resolvedBorderWidth(theme: SBThemeName) -> CGFloat {
+        CGFloat(borderWidth ?? Double(theme.defaultPanelBorderWidth))
     }
 }
