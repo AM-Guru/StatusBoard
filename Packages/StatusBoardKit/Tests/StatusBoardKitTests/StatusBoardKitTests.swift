@@ -1878,6 +1878,13 @@ struct WatchLayoutTests {
                       contentScale: contentScale)
     }
 
+    /// Keep floating-point arithmetic outside `#expect`. Swift 6.3 expands a
+    /// binary expectation into a large generic diagnostic expression and can
+    /// time out type-checking mixed `CGFloat`/literal math that Swift 6.4 accepts.
+    private func approximatelyEqual(_ lhs: CGFloat, _ rhs: CGFloat) -> Bool {
+        abs(lhs - rhs) < 0.001
+    }
+
     /// Eight declared rows, two of them used: the board is two rows tall and a
     /// window that fits them does not scroll at all.
     @Test func emptyRowsBelowTheContentAreNotDrawn() {
@@ -1911,8 +1918,10 @@ struct WatchLayoutTests {
     /// cropping the canvas must not quietly resize anybody's panels.
     @Test func croppingDoesNotChangeRowHeight() {
         let tall = canvas(.mac, screenHeight: 900, gridRows: 6, panels: panels(rows: 3))
-        #expect(tall.rowHeight == (900.0 - 10) / 6)      // still one sixth of the window
-        #expect(tall.contentHeight == tall.rowHeight * 3 + 10)
+        let expectedRowHeight: CGFloat = (900 - spacing) / 6
+        let expectedContentHeight: CGFloat = expectedRowHeight * 3 + spacing
+        #expect(approximatelyEqual(tall.rowHeight, expectedRowHeight))
+        #expect(approximatelyEqual(tall.contentHeight, expectedContentHeight))
         #expect(tall.scrolls == false)
     }
 
@@ -1927,23 +1936,25 @@ struct WatchLayoutTests {
     /// Nothing scrolls from the sofa or on a pair of lenses, so those screens
     /// squeeze to fit as they always have.
     @Test func displayOnlyScreensAlwaysFit() {
+        let expectedRowHeight: CGFloat = (720 - spacing) / 4
         for device in [SBDeviceClass.tv, .glasses] {
             let board = canvas(device, screenHeight: 720, gridRows: 4, panels: panels(rows: 4))
-            #expect(board.rowHeight == (720.0 - 10) / 4)
+            #expect(approximatelyEqual(board.rowHeight, expectedRowHeight))
             #expect(board.scrolls == false)
             #expect(board.height == 720)
         }
     }
 
     @Test func contentScalingGrowsScrollableBoardsButNotTelevision() {
+        let fittedRowHeight: CGFloat = (600 - spacing) / 4
         let mac = canvas(.mac, screenHeight: 600, gridRows: 4,
                          panels: panels(rows: 4), contentScale: 1.5)
-        #expect(abs(mac.rowHeight - ((600.0 - 10) / 4) * 1.5) < 0.001)
+        #expect(approximatelyEqual(mac.rowHeight, fittedRowHeight * 1.5))
         #expect(mac.scrolls)
 
         let tv = canvas(.tv, screenHeight: 600, gridRows: 4,
                         panels: panels(rows: 4), contentScale: 1.5)
-        #expect(abs(tv.rowHeight - (600.0 - 10) / 4) < 0.001)
+        #expect(approximatelyEqual(tv.rowHeight, fittedRowHeight))
         #expect(!tv.scrolls)
     }
 

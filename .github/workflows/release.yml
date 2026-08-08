@@ -47,6 +47,11 @@ jobs:
     if: github.repository == 'AM-Guru/StatusBoard'
     runs-on: [self-hosted, macOS, media, statusboard]
     timeout-minutes: 30
+    # Use the same Xcode/Swift toolchain as the release job. Without this the
+    # runner's long-lived shell can resolve an older command-line toolchain,
+    # so tests compile under Swift 6.3 while the app builds under Swift 6.4.
+    env:
+      DEVELOPER_DIR: ${{ vars.XCODE_DEVELOPER_DIR }}
     steps:
       - name: Check out the commit
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
